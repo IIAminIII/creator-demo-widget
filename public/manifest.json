@@ -1,0 +1,23 @@
+{
+  "service": "CREATOR",
+  "cspDomains": {
+    "connect-src": []
+  },
+  "config": [
+    {
+      "name": "appName",
+      "type": "Application",
+      "help": "Optional. Map this when the widget should target another app in the same Creator account."
+    },
+    {
+      "name": "formName",
+      "type": "Form",
+      "help": "Map the form used for create operations and field metadata."
+    },
+    {
+      "name": "reportName",
+      "type": "Report",
+      "help": "Map the report used for record listing, updates, and deletes."
+    }
+  ]
+}
