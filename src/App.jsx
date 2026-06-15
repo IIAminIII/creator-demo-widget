@@ -224,10 +224,10 @@ export default function App() {
         <div className="space-y-4">
           <span className="badge badge-primary badge-outline">Zoho Creator</span>
           <div>
-            <h1 className="text-3xl font-black tracking-tight">
+            <h1 className="text-3xl font-black tracking-tight text-slate-900">
               Creator Demo Widget
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-base-content/70">
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
               This starter widget initializes the Zoho Creator SDK, loads form
               metadata plus report records, and demonstrates a simple CRUD
               workflow you can adapt to your Creator app.
@@ -264,32 +264,32 @@ export default function App() {
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-6">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
+          <div className="widget-surface p-5">
             <div className="mb-4 flex flex-wrap items-end gap-3">
-              <label className="form-control flex-1 gap-2">
-                <span className="label-text font-medium text-slate-700">Application name</span>
+              <label className="widget-field">
+                <span className="widget-label">Application name</span>
                 <input
-                  className="input input-bordered border-slate-300 bg-white text-slate-900 placeholder:text-slate-400"
+                  className="widget-input"
                   type="text"
                   placeholder="Leave empty for current app"
                   value={appName}
                   onChange={(event) => setAppName(event.target.value)}
                 />
               </label>
-              <label className="form-control flex-1 gap-2">
-                <span className="label-text font-medium text-slate-700">Form name</span>
+              <label className="widget-field">
+                <span className="widget-label">Form name</span>
                 <input
-                  className="input input-bordered border-slate-300 bg-white text-slate-900 placeholder:text-slate-400"
+                  className="widget-input"
                   type="text"
                   placeholder="Orders"
                   value={formName}
                   onChange={(event) => setFormName(event.target.value)}
                 />
               </label>
-              <label className="form-control flex-1 gap-2">
-                <span className="label-text font-medium text-slate-700">Report name</span>
+              <label className="widget-field">
+                <span className="widget-label">Report name</span>
                 <input
-                  className="input input-bordered border-slate-300 bg-white text-slate-900 placeholder:text-slate-400"
+                  className="widget-input"
                   type="text"
                   placeholder="All_Orders"
                   value={reportName}
@@ -298,7 +298,7 @@ export default function App() {
               </label>
               <button
                 type="button"
-                className="btn border-0 bg-slate-950 text-white shadow-sm hover:bg-slate-800"
+                className="widget-primary-button"
                 onClick={loadFormData}
                 disabled={!isReady || listLoading}
               >
@@ -336,9 +336,9 @@ export default function App() {
             onSubmit={handleSave}
           />
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 text-slate-900 shadow-sm">
+          <div className="widget-surface p-5">
             <h3 className="font-semibold text-slate-900">Context snapshot</h3>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="widget-muted mt-2 text-sm">
               Useful while wiring this demo to your real Creator application.
             </p>
             <pre className="mt-4 max-h-80 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">

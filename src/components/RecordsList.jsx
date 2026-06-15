@@ -36,7 +36,7 @@ export default function RecordsList({
 
   if (loading) {
     return (
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="widget-surface p-6">
         <div className="space-y-3">
           <div className="skeleton h-6 w-48" />
           <div className="skeleton h-16 w-full" />
@@ -48,9 +48,9 @@ export default function RecordsList({
 
   if (!records.length) {
     return (
-      <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-900 shadow-sm">
+      <div className="widget-empty-state p-8 text-center">
         <h3 className="text-lg font-semibold text-slate-900">No records yet</h3>
-        <p className="mt-2 text-sm text-slate-500">
+        <p className="mt-2 text-sm widget-muted">
           Load a report to preview records here.
         </p>
       </div>
