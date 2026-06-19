@@ -1,37 +1,41 @@
-# Creator Demo Widget
+# Invoice Approval Workspace Widget
 
-A starter Zoho Creator widget built with Vite, React, Tailwind CSS, and DaisyUI.
+Day 45 MVP for a Zoho Creator widget that presents an invoice approval workspace for:
 
-## What is included
+- Zoho Books as the invoice source of truth
+- Zoho Creator as the approval workflow owner
+- Zoho CRM as future read-only customer and deal context
 
-- Promise-based `ZOHO.CREATOR.init()` initialization in a shared provider
-- Centralized Creator API wrapper in `src/services/creatorApi.js`
-- Demo CRUD UI for loading report records and creating, updating, and deleting via the documented JS API v2 methods
-- Widget parameter support via `manifest.json` and `ZOHO.CREATOR.UTIL.getWidgetParams()`
-- A context/debug panel for inspecting initialization data, widget params, and form metadata
+This version is intentionally mock-first. It does not call Zoho Books or Zoho CRM directly, and it does not require a separate backend.
 
-## Project structure
+## Feasibility
+
+Yes, this frontend is feasible inside a Zoho Creator widget.
+
+- The UX is entirely client-side and works with local mock state today.
+- The service layer already follows a clean contract that can switch to Creator custom APIs later.
+- Creator remains the only server-side system you need for the next step.
+- No frontend tokens are required or embedded.
+
+## Delivered structure
 
 ```text
-src/
-  main.jsx
-  App.jsx
-  App.css
-  index.css
-  contexts/
-    DataContext.jsx
-    DataProvider.jsx
-  services/
-    creatorApi.js
-  components/
-    LoadingSpinner.jsx
-    RecordsList.jsx
-    RecordForm.jsx
+index.html
+widget.html
+css/
+  style.css
+js/
+  config.js
+  mockData.js
+  invoiceApprovalService.js
+  app.js
 public/
   manifest.json
 ```
 
-## Getting started
+`index.html` is the build entry used by Vite. `widget.html` mirrors the same UI layout so the requested widget file is present explicitly in the repo.
+
+## Setup instructions
 
 1. Install dependencies:
 
@@ -39,35 +43,73 @@ public/
    npm install
    ```
 
-2. Start the dev server:
+2. Start local development:
 
    ```bash
    npm run dev
    ```
 
-3. Build the widget for deployment:
+3. Open the local Vite URL in the browser. The widget will run in mock mode by default.
+
+4. Build the widget:
 
    ```bash
    npm run build
    ```
 
-4. Build and package a ready-to-upload Zoho widget ZIP:
+5. Build and package the upload ZIP for Zoho Creator:
 
    ```bash
    npm run build:widget
    ```
 
-   This creates `creator-demo-widget.zip` in the project root from the latest `dist/` output.
+## How to test locally
 
-## Zoho Creator integration notes
+1. Confirm the header shows `Mock preview mode`.
+2. Change the approval status filter and verify the inbox updates.
+3. Click different invoices and verify the active selection stays highlighted.
+4. Approve an invoice with or without comment.
+5. Reject an invoice and confirm a comment is required.
+6. Request clarification and confirm a comment is required.
+7. Add a comment only and verify comments and audit entries update immediately.
+8. Refresh the inbox and confirm the selected invoice remains active when still visible.
 
-- The Zoho Creator SDK script is loaded in `index.html`.
-- The app waits for `ZOHO.CREATOR.init()` before any API call is attempted.
-- `public/manifest.json` is copied into the build output and defines Creator widget configuration for `appName`, `formName`, and `reportName`.
-- At runtime, the app reads `ZOHO.CREATOR.UTIL.getWidgetParams()` and uses those mapped values as defaults before falling back to session/init context or manual input.
-- The current wrapper matches the documented JS API v2 surface:
-  - `ZOHO.CREATOR.DATA.getRecords`, `getRecordById`, `addRecords`, `updateRecordById`, `deleteRecordById`
-  - `ZOHO.CREATOR.META.getFields`, `getForms`
-- JS API v2 uses `report_name` for record fetch/update/delete tasks and `form_name` for create and field metadata tasks, so the demo exposes both inputs.
-- For Zoho Creator internal widget hosting, code changes still require re-uploading the widget package. Use `npm run build:widget` to regenerate a fresh uploadable ZIP quickly.
-- The built widget assets will be generated in `dist/` and can be packaged for upload to Zoho Creator.
+## Values to replace later
+
+When you move from mock mode to Creator custom API mode, update these values first:
+
+- `js/config.js`
+  - `useMockData`
+  - `currentReviewerName`
+  - `creator.appLinkName`
+  - `creator.reports.*`
+  - `creator.forms.*`
+  - `creator.customApis.*`
+- `public/manifest.json`
+  - Widget parameter names for report, form, and function mapping
+
+You can also override many of those values through Zoho Creator widget parameters instead of editing code.
+
+## Switching to Creator custom API mode later
+
+1. Set `useMockData` to `false` in `js/config.js`, or pass widget param `useMockData = false`.
+2. Create Creator custom APIs that return and accept the frontend contracts used by `js/invoiceApprovalService.js`.
+3. Map the function names in widget parameters or in `js/config.js`:
+   - `loadInboxFunctionName`
+   - `loadInvoiceDetailFunctionName`
+   - `approveInvoiceFunctionName`
+   - `rejectInvoiceFunctionName`
+   - `requestClarificationFunctionName`
+   - `addCommentFunctionName`
+4. Make each Creator custom API return the same shapes used in the mock service:
+   - `InvoiceInboxItem`
+   - `InvoiceDetail`
+   - `ApprovalActionPayload`
+5. Keep Books and CRM integration behind Creator functions only. The frontend should continue talking only to Creator.
+
+## Notes
+
+- No Zoho Books API calls are implemented in this MVP.
+- No Zoho CRM API calls are implemented in this MVP.
+- No frontend secrets or tokens are hardcoded.
+- The older React-based prototype remains in `src/`, but the active widget entry now uses the plain modular Day 45 structure above.

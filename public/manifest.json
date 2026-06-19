@@ -5,19 +5,104 @@
   },
   "config": [
     {
-      "name": "appName",
+      "name": "creatorAppName",
       "type": "Application",
-      "help": "Optional. Map this when the widget should target another app in the same Creator account."
+      "help": "Optional. Map this when the widget should target another Creator app in the same account."
     },
     {
-      "name": "formName",
+      "name": "approvalRequestsFormName",
       "type": "Form",
-      "help": "Map the form used for create operations and field metadata."
+      "help": "Creator form used to store invoice approval workflow records."
     },
     {
-      "name": "reportName",
+      "name": "approvalRequestsReportName",
       "type": "Report",
-      "help": "Map the report used for record listing, updates, and deletes."
+      "help": "Creator report used as the invoice approval inbox source."
+    },
+    {
+      "name": "commentsFormName",
+      "type": "Form",
+      "help": "Creator form used to store approval comments."
+    },
+    {
+      "name": "commentsReportName",
+      "type": "Report",
+      "help": "Creator report used to read approval comments."
+    },
+    {
+      "name": "auditLogFormName",
+      "type": "Form",
+      "help": "Creator form used to store invoice approval audit events."
+    },
+    {
+      "name": "auditLogReportName",
+      "type": "Report",
+      "help": "Creator report used to read audit entries."
+    },
+    {
+      "name": "booksListFunctionName",
+      "type": "string",
+      "help": "Creator-side function that returns the Books-backed invoice inbox."
+    },
+    {
+      "name": "loadInboxFunctionName",
+      "type": "string",
+      "help": "Optional Creator custom API name for the invoice inbox service contract."
+    },
+    {
+      "name": "loadInvoiceDetailFunctionName",
+      "type": "string",
+      "help": "Optional Creator custom API name for loading the full invoice approval detail object."
+    },
+    {
+      "name": "booksDetailFunctionName",
+      "type": "string",
+      "help": "Creator-side function that returns or refreshes a Books invoice snapshot."
+    },
+    {
+      "name": "crmContextFunctionName",
+      "type": "string",
+      "help": "Creator-side function that enriches invoice data with CRM account/deal context."
+    },
+    {
+      "name": "approvalActionFunctionName",
+      "type": "string",
+      "help": "Creator-side function that pushes approval outcomes back to Books."
+    },
+    {
+      "name": "approveInvoiceFunctionName",
+      "type": "string",
+      "help": "Optional Creator custom API name for approveInvoice(recordId, payload)."
+    },
+    {
+      "name": "rejectInvoiceFunctionName",
+      "type": "string",
+      "help": "Optional Creator custom API name for rejectInvoice(recordId, payload)."
+    },
+    {
+      "name": "requestClarificationFunctionName",
+      "type": "string",
+      "help": "Optional Creator custom API name for requestClarification(recordId, payload)."
+    },
+    {
+      "name": "addCommentFunctionName",
+      "type": "string",
+      "help": "Optional Creator custom API name for addComment(recordId, payload)."
+    },
+    {
+      "name": "currentReviewerName",
+      "type": "string",
+      "help": "Optional default reviewer name shown in the approval controls."
+    },
+    {
+      "name": "useMockData",
+      "type": "string",
+      "help": "Set to false later when Creator custom APIs are ready. The Day 45 MVP should stay true."
+    },
+    {
+      "name": "inboxDefaultStatusFilter",
+      "type": "string",
+      "help": "Optional default status filter for the invoice inbox. Example: All or Under Review."
     }
   ]
 }

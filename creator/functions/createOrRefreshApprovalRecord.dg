@@ -1,0 +1,75 @@
+// Creator function: createOrRefreshApprovalRecord
+// Ensures one Creator approval record exists per Books invoice.
+// Call this during first intake or first open of an invoice detail.
+// Idempotent — safe to call multiple times; returns the existing record if already created.
+//
+// Widget calls this via: api.invokeFunction("createOrRefreshApprovalRecord", { invoiceId })
+// Expected response shape: { approvalRecordId }
+
+invoiceId = input.get("invoiceId");
+
+if (invoiceId == null || invoiceId == "") {
+    error = Map();
+    error.put("error", "invoiceId is required");
+    return error;
+}
+
+// --- Check for existing approval record ---
+criteria = 'Books_Invoice_ID == "' + invoiceId + '"';
+existing = zoho.creator.getRecords("your_app", "Pending_Invoice_Approvals", criteria, 1, 1, "zoho_creator");
+
+if (existing.size() > 0) {
+    existingRecord = existing.get(0);
+    result = Map();
+    result.put("approvalRecordId", existingRecord.get("ID"));
+    result.put("created", false);
+    return result;
+}
+
+// --- Fetch snapshot from Books ---
+booksResponse = invokeurl
+[
+    url: "https://books.zoho.com/api/v3/invoices/" + invoiceId
+    type: GET
+    connection: "zoho_books"
+];
+invoice = booksResponse.get("invoice");
+if (invoice == null) {
+    error = Map();
+    error.put("error", "Invoice not found in Zoho Books — cannot create approval record");
+    return error;
+}
+
+now = zoho.currenttime.toString();
+
+// --- Create the approval record ---
+newRecord = Map();
+newRecord.put("Books_Invoice_ID",       invoiceId);
+newRecord.put("Books_Invoice_Number",   invoice.get("invoice_number"));
+newRecord.put("Books_Customer_ID",      invoice.get("customer_id"));
+newRecord.put("Books_Customer_Name",    invoice.get("customer_name"));
+newRecord.put("Invoice_Total",          invoice.get("total").toDecimal());
+newRecord.put("Currency_Code",          invoice.get("currency_code"));
+newRecord.put("Invoice_Date",           invoice.get("date"));
+newRecord.put("Due_Date",               invoice.get("due_date"));
+newRecord.put("Books_Invoice_Status",   invoice.get("status"));
+newRecord.put("Books_Payment_Status",   invoice.get("payment_status"));
+newRecord.put("Approval_Status",        "New");
+newRecord.put("Priority",               "Medium");
+newRecord.put("Last_Books_Sync_At",     now);
+
+addResponse = zoho.creator.addRecord("your_app", "Invoice_Approval_Requests", newRecord, "zoho_creator");
+newRecordId = addResponse.get("ID");
+
+// --- Write intake audit event ---
+auditRecord = Map();
+auditRecord.put("Approval_Request_ID", newRecordId);
+auditRecord.put("Event_Type",          "Record created");
+auditRecord.put("Event_Summary",       "Approval request created from Books invoice import.");
+auditRecord.put("Actor",               "System");
+zoho.creator.addRecord("your_app", "Invoice_Approval_Audit_Log", auditRecord, "zoho_creator");
+
+result = Map();
+result.put("approvalRecordId", newRecordId);
+result.put("created", true);
+return result;
