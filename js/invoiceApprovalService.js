@@ -173,15 +173,14 @@ function createMockService(config) {
       const previousStatus = record.approval.approvalStatus;
       record.approval.approvalStatus = "Approved";
       record.approval.assignedReviewer = payload.reviewer;
-      record.approval.reviewerNotes = normalizeText(payload.comment) || record.approval.reviewerNotes;
+      record.approval.reviewerNotes =
+        normalizeText(payload.comment) || record.approval.reviewerNotes;
       record.approval.approvalDecisionDate = nowIso();
       record.approval.exceptionReason = normalizeText(payload.exceptionReason);
       record.approval.syncStatus = "Pending Push";
 
       if (normalizeText(payload.comment)) {
-        record.comments.unshift(
-          buildActionComment(payload, "Approval Note"),
-        );
+        record.comments.unshift(buildActionComment(payload, "Approval Note"));
       }
 
       record.audit.unshift(
@@ -288,65 +287,284 @@ function createMockService(config) {
   };
 }
 
-function extractDataArray(response) {
-  if (Array.isArray(response)) {
-    return response;
+function unwrapCreatorApiResponse(response) {
+  const possible =
+    response?.result || response?.data?.result || response?.data || response;
+
+  if (typeof possible === "string") {
+    try {
+      return JSON.parse(possible);
+    } catch (error) {
+      return {
+        ok: false,
+        message: "Creator Custom API returned an unparseable string response.",
+        raw: possible,
+      };
+    }
   }
 
-  if (Array.isArray(response?.data)) {
-    return response.data;
+  return possible;
+}
+
+function getNestedValue(record, keys, fallback = "") {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
   }
 
-  if (Array.isArray(response?.result)) {
-    return response.result;
+  return fallback;
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (Array.isArray(value?.data)) {
+    return value.data;
+  }
+
+  if (Array.isArray(value?.result)) {
+    return value.result;
   }
 
   return [];
 }
 
-async function invokeCreatorFunction(creator, functionName, payload) {
-  if (!functionName) {
-    throw new Error("The required Creator custom API name has not been configured.");
-  }
+function toNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
-  const candidates = [
-    ["FUNCTIONS", "execute"],
-    ["UTIL", "executeFunction"],
-    ["executeFunction"],
-  ];
-
-  for (const path of candidates) {
-    const method = path.reduce((value, key) => value?.[key], creator);
-    if (typeof method === "function") {
-      return method({ name: functionName, payload });
-    }
-  }
-
-  throw new Error(
-    "The current Creator SDK runtime does not expose a function invocation method. Keep mock mode enabled until your custom API bridge is ready.",
+function isSuccessfulResponse(response) {
+  return (
+    response?.ok === true ||
+    response?.success === true ||
+    response?.status === "success"
   );
 }
 
-function mapCreatorInboxRecord(record) {
+function toIsoOrEmpty(value) {
+  return typeof value === "string" ? value : "";
+}
+
+function mapApprovalRecord(record) {
   return {
-    approvalRecordId: String(record.ID || record.approvalRecordId || ""),
-    booksInvoiceId: record.Books_Invoice_ID || "",
-    invoiceNumber: record.Books_Invoice_Number || "",
-    customerName: record.CRM_Account_Name || record.customerName || "",
-    invoiceTotal: Number(record.Invoice_Total || 0),
-    currencyCode: record.Currency_Code || "USD",
-    dueDate: record.Due_Date || "",
-    booksStatus: record.Books_Invoice_Status || "",
-    paymentStatus: record.Books_Payment_Status || "",
-    approvalStatus: record.Approval_Status || "New",
-    priority: record.Priority || "Medium",
-    crmAccountName: record.CRM_Account_Name || "",
+    approvalRecordId: String(getNestedValue(record, ["ID", "id"], "")),
+    booksInvoiceId: String(
+      getNestedValue(record, ["Books_Invoice_ID", "booksInvoiceId"], ""),
+    ),
+    invoiceNumber: String(
+      getNestedValue(
+        record,
+        ["Books_Invoice_Number", "Invoice_Number", "invoiceNumber"],
+        "",
+      ),
+    ),
+    customerName: String(
+      getNestedValue(
+        record,
+        ["Customer_Name", "Books_Customer_Name", "customerName"],
+        "",
+      ),
+    ),
+    invoiceTotal: toNumber(getNestedValue(record, ["Invoice_Total"], 0)),
+    currencyCode: String(getNestedValue(record, ["Currency_Code"], "USD")),
+    dueDate: String(getNestedValue(record, ["Due_Date"], "")),
+    invoiceDate: String(getNestedValue(record, ["Invoice_Date"], "")),
+    booksStatus: String(
+      getNestedValue(record, ["Books_Invoice_Status"], "Unknown"),
+    ),
+    paymentStatus: String(
+      getNestedValue(record, ["Books_Payment_Status"], "Unknown"),
+    ),
+    approvalStatus: String(getNestedValue(record, ["Approval_Status"], "New")),
+    priority: String(getNestedValue(record, ["Priority"], "Medium")),
+    assignedReviewer: String(
+      getNestedValue(record, ["Assigned_Reviewer"], "Unassigned"),
+    ),
+    exceptionReason: String(getNestedValue(record, ["Exception_Reason"], "")),
+    reviewerNotes: String(getNestedValue(record, ["Reviewer_Notes"], "")),
+    approvalDecisionDate: String(
+      getNestedValue(record, ["Approval_Decision_Date"], ""),
+    ),
+    lastBooksSyncAt: String(getNestedValue(record, ["Last_Books_Sync_At"], "")),
+    lastCrmEnrichmentAt: String(
+      getNestedValue(record, ["Last_CRM_Enrichment_At"], ""),
+    ),
+    crmAccountName: String(getNestedValue(record, ["CRM_Account_Name"], "")),
+    crmDealName: String(getNestedValue(record, ["CRM_Deal_Name"], "")),
+    accountOwner: String(
+      getNestedValue(record, ["CRM_Account_Owner", "Account_Owner"], ""),
+    ),
+    dealStage: String(getNestedValue(record, ["CRM_Deal_Stage"], "")),
+    riskLevel: String(getNestedValue(record, ["CRM_Risk_Level"], "")),
+    syncStatus: String(getNestedValue(record, ["Sync_Status"], "Unknown")),
   };
 }
 
+function mapCommentRecord(record) {
+  return {
+    id: String(getNestedValue(record, ["ID", "id"], `COM-${Date.now()}`)),
+    commentType: String(getNestedValue(record, ["Comment_Type"], "Internal Note")),
+    comment: String(getNestedValue(record, ["Comment_Body", "Comment"], "")),
+    addedBy: String(getNestedValue(record, ["Author", "Created_By"], "System")),
+    addedDate: toIsoOrEmpty(
+      getNestedValue(record, ["Created_At", "Modified_Time"], ""),
+    ),
+  };
+}
+
+function mapAuditRecord(record) {
+  return {
+    id: String(getNestedValue(record, ["ID", "id"], `AUD-${Date.now()}`)),
+    eventType: String(getNestedValue(record, ["Event_Type"], "Activity")),
+    previousStatus: String(getNestedValue(record, ["Previous_Status"], "")),
+    newStatus: String(getNestedValue(record, ["New_Status"], "")),
+    eventMessage: String(
+      getNestedValue(record, ["Event_Summary", "Summary"], "Activity logged."),
+    ),
+    actor: String(getNestedValue(record, ["Actor", "Created_By"], "System")),
+    eventDate: toIsoOrEmpty(
+      getNestedValue(record, ["Created_At", "Modified_Time"], ""),
+    ),
+    externalSystem: String(
+      getNestedValue(record, ["External_System"], "Creator"),
+    ),
+    externalReferenceId: String(
+      getNestedValue(record, ["External_Reference_ID", "Approval_Request_ID"], ""),
+    ),
+  };
+}
+
+function mapBooksDetail(detail, fallbackRecord) {
+  return {
+    booksInvoiceId: String(
+      getNestedValue(
+        detail,
+        ["booksInvoiceId"],
+        fallbackRecord.booksInvoiceId,
+      ),
+    ),
+    invoiceNumber: String(
+      getNestedValue(detail, ["invoiceNumber"], fallbackRecord.invoiceNumber),
+    ),
+    customerName: String(
+      getNestedValue(detail, ["customerName"], fallbackRecord.customerName),
+    ),
+    invoiceTotal: toNumber(
+      getNestedValue(detail, ["invoiceTotal"], fallbackRecord.invoiceTotal),
+    ),
+    currencyCode: String(
+      getNestedValue(detail, ["currencyCode"], fallbackRecord.currencyCode),
+    ),
+    dueDate: String(getNestedValue(detail, ["dueDate"], fallbackRecord.dueDate)),
+    invoiceDate: String(
+      getNestedValue(detail, ["invoiceDate"], fallbackRecord.invoiceDate),
+    ),
+    booksStatus: String(
+      getNestedValue(detail, ["booksStatus"], fallbackRecord.booksStatus),
+    ),
+    paymentStatus: String(
+      getNestedValue(detail, ["paymentStatus"], fallbackRecord.paymentStatus),
+    ),
+    lineItems: Array.isArray(detail?.lineItems) ? detail.lineItems : [],
+    lastBooksSyncAt: String(
+      getNestedValue(detail, ["lastBooksSyncAt"], fallbackRecord.lastBooksSyncAt),
+    ),
+  };
+}
+
+async function invokeCreatorCustomApi(apiName, payload = {}) {
+  if (!apiName) {
+    throw new Error("Creator Custom API name is missing in widget config.");
+  }
+
+  if (!window.ZOHO?.CREATOR?.API?.invokeCustomApi) {
+    throw new Error(
+      "ZOHO.CREATOR.API.invokeCustomApi is not available. Test the widget inside Zoho Creator, not only local browser.",
+    );
+  }
+
+  const response = await window.ZOHO.CREATOR.API.invokeCustomApi({
+    api_name: apiName,
+    http_method: "POST",
+    content_type: "application/json",
+    payload,
+  });
+
+  return unwrapCreatorApiResponse(response);
+}
+
+async function invokeCreatorDataMethod(creator, path, payload, fallbackMessage) {
+  const method = path.reduce((value, key) => value?.[key], creator);
+
+  if (typeof method !== "function") {
+    throw new Error(fallbackMessage);
+  }
+
+  return method(payload);
+}
+
+async function getCreatorRecordById(config, creator, recordId) {
+  const response = await invokeCreatorDataMethod(
+    creator,
+    ["DATA", "getRecordById"],
+    {
+      app_name: config.creator.appLinkName,
+      report_name: config.creator.reports.inbox,
+      id: recordId,
+    },
+    "Creator record lookup is not available in the current SDK runtime.",
+  );
+
+  const records = toArray(response);
+  if (records[0]) {
+    return records[0];
+  }
+
+  if (response?.data && !Array.isArray(response.data)) {
+    return response.data;
+  }
+
+  return response;
+}
+
+async function getCreatorRecords(config, creator, reportName, criteria) {
+  const response = await invokeCreatorDataMethod(
+    creator,
+    ["DATA", "getRecords"],
+    {
+      app_name: config.creator.appLinkName,
+      report_name: reportName,
+      criteria,
+    },
+    "Creator report lookup is not available in the current SDK runtime.",
+  );
+
+  return toArray(response);
+}
+
+function normalizeApiEnvelope(response) {
+  if (isSuccessfulResponse(response)) {
+    return response;
+  }
+
+  if (response?.status === "success" && response?.result) {
+    return response.result;
+  }
+
+  return response;
+}
+
 function createCreatorService(config, creator, widgetContext) {
+  const customApis = config.creator?.customApis || {};
+
   return {
     mode: "creator",
+
     async init() {
       return {
         mode: "creator",
@@ -355,57 +573,214 @@ function createCreatorService(config, creator, widgetContext) {
         widgetContext,
       };
     },
+
     async loadInbox(filters = {}) {
-      const response = await invokeCreatorFunction(
-        creator,
-        config.creator.customApis.loadInbox,
-        { filters },
-      );
-      const allItems = extractDataArray(response).map(mapCreatorInboxRecord);
-      const items = allItems.filter((item) => matchesFilters(item, filters));
+      const response = await invokeCreatorCustomApi(customApis.loadInbox, {
+        status: filters.approvalStatus || filters.status || "All",
+        search: filters.search || "",
+      });
+
+      const normalized = normalizeApiEnvelope(response);
+      const items = normalized?.items || normalized?.data?.items;
+
+      if (!Array.isArray(items)) {
+        throw new Error(normalized?.message || "Failed to load approval inbox.");
+      }
+
       return {
         items,
-        summary: getSummary(allItems),
+        summary:
+          normalized?.summary || normalized?.data?.summary || getSummary(items),
       };
     },
+
     async loadInvoiceDetail(recordId) {
-      const response = await invokeCreatorFunction(
-        creator,
-        config.creator.customApis.loadInvoiceDetail,
-        { recordId },
+      const approvalRecordRaw = await getCreatorRecordById(config, creator, recordId);
+      const approvalRecord = mapApprovalRecord(approvalRecordRaw);
+
+      if (!approvalRecord.approvalRecordId) {
+        throw new Error("Failed to load the approval record from Creator.");
+      }
+
+      const booksDetailResponse = await invokeCreatorCustomApi(
+        customApis.loadInvoiceDetail,
+        {
+          invoiceId: approvalRecord.booksInvoiceId,
+          mode: "view",
+        },
       );
-      return response?.data || response;
+      const booksDetail = mapBooksDetail(
+        normalizeApiEnvelope(booksDetailResponse),
+        approvalRecord,
+      );
+
+      let crmContext = {
+        crmAccountName: approvalRecord.crmAccountName,
+        crmDealName: approvalRecord.crmDealName,
+        accountOwner: approvalRecord.accountOwner,
+        dealStage: approvalRecord.dealStage,
+        riskLevel: approvalRecord.riskLevel,
+        lastActivityDate: "",
+      };
+
+      if (customApis.loadCrmContext) {
+        try {
+          const crmResponse = await invokeCreatorCustomApi(customApis.loadCrmContext, {
+            customerId: "",
+            customerName: booksDetail.customerName,
+          });
+          const crmData = normalizeApiEnvelope(crmResponse);
+          crmContext = {
+            crmAccountName:
+              crmData?.accountName || approvalRecord.crmAccountName || "",
+            crmDealName: crmData?.dealName || approvalRecord.crmDealName || "",
+            accountOwner:
+              crmData?.accountManager || approvalRecord.accountOwner || "",
+            dealStage: crmData?.segment || approvalRecord.dealStage || "",
+            riskLevel: approvalRecord.riskLevel || "Unknown",
+            lastActivityDate: crmData?.renewalWindow || "",
+          };
+        } catch {
+          // CRM enrichment should never block approvals.
+        }
+      }
+
+      const comments = (
+        await getCreatorRecords(
+          config,
+          creator,
+          config.creator.reports.comments,
+          `Approval_Request_ID == "${approvalRecord.approvalRecordId}"`,
+        )
+      ).map(mapCommentRecord);
+
+      const audit = (
+        await getCreatorRecords(
+          config,
+          creator,
+          config.creator.reports.audit,
+          `Approval_Request_ID == "${approvalRecord.approvalRecordId}"`,
+        )
+      ).map(mapAuditRecord);
+
+      return {
+        approvalRecordId: approvalRecord.approvalRecordId,
+        invoice: {
+          approvalRecordId: approvalRecord.approvalRecordId,
+          booksInvoiceId: booksDetail.booksInvoiceId,
+          invoiceNumber: booksDetail.invoiceNumber,
+          customerName: booksDetail.customerName,
+          invoiceTotal: booksDetail.invoiceTotal,
+          currencyCode: booksDetail.currencyCode,
+          dueDate: booksDetail.dueDate,
+          invoiceDate: booksDetail.invoiceDate,
+          booksStatus: booksDetail.booksStatus,
+          paymentStatus: booksDetail.paymentStatus,
+          crmAccountName: crmContext.crmAccountName,
+        },
+        lineItems: booksDetail.lineItems,
+        crmContext,
+        approval: {
+          approvalStatus: approvalRecord.approvalStatus,
+          assignedReviewer: approvalRecord.assignedReviewer,
+          priority: approvalRecord.priority,
+          exceptionReason: approvalRecord.exceptionReason,
+          reviewerNotes: approvalRecord.reviewerNotes,
+          approvalDecisionDate: approvalRecord.approvalDecisionDate,
+          lastBooksSyncAt: booksDetail.lastBooksSyncAt,
+          lastCrmEnrichmentAt: approvalRecord.lastCrmEnrichmentAt,
+          syncStatus: approvalRecord.syncStatus,
+        },
+        comments,
+        audit,
+      };
     },
+
     async approveInvoice(recordId, payload) {
-      await invokeCreatorFunction(
-        creator,
-        config.creator.customApis.approveInvoice,
-        { recordId, ...payload, decision: "Approved" },
-      );
+      const response = await invokeCreatorCustomApi(customApis.approveInvoice, {
+        recordId,
+        decision: "Approved",
+        comment: payload.comment || "",
+        reviewer: payload.reviewer || "",
+        exceptionReason: payload.exceptionReason || "",
+      });
+
+      const normalized = normalizeApiEnvelope(response);
+
+      if (!isSuccessfulResponse(normalized)) {
+        throw new Error(normalized?.message || "Failed to approve invoice.");
+      }
+
       return this.loadInvoiceDetail(recordId);
     },
+
     async rejectInvoice(recordId, payload) {
-      await invokeCreatorFunction(
-        creator,
-        config.creator.customApis.rejectInvoice,
-        { recordId, ...payload, decision: "Rejected" },
-      );
+      if (!normalizeText(payload?.comment)) {
+        throw new Error("Rejecting an invoice requires a comment.");
+      }
+
+      const response = await invokeCreatorCustomApi(customApis.rejectInvoice, {
+        recordId,
+        decision: "Rejected",
+        comment: payload.comment,
+        reviewer: payload.reviewer || "",
+        exceptionReason: payload.exceptionReason || payload.comment,
+      });
+
+      const normalized = normalizeApiEnvelope(response);
+
+      if (!isSuccessfulResponse(normalized)) {
+        throw new Error(normalized?.message || "Failed to reject invoice.");
+      }
+
       return this.loadInvoiceDetail(recordId);
     },
+
     async requestClarification(recordId, payload) {
-      await invokeCreatorFunction(
-        creator,
-        config.creator.customApis.requestClarification,
-        { recordId, ...payload, decision: "Needs Clarification" },
+      if (!normalizeText(payload?.comment)) {
+        throw new Error("Requesting clarification requires a comment.");
+      }
+
+      const response = await invokeCreatorCustomApi(
+        customApis.requestClarification,
+        {
+          recordId,
+          decision: "Needs Clarification",
+          comment: payload.comment,
+          reviewer: payload.reviewer || "",
+          exceptionReason: payload.exceptionReason || payload.comment,
+        },
       );
+
+      const normalized = normalizeApiEnvelope(response);
+
+      if (!isSuccessfulResponse(normalized)) {
+        throw new Error(
+          normalized?.message || "Failed to request clarification.",
+        );
+      }
+
       return this.loadInvoiceDetail(recordId);
     },
+
     async addComment(recordId, payload) {
-      await invokeCreatorFunction(
-        creator,
-        config.creator.customApis.addComment,
-        { recordId, ...payload },
-      );
+      if (!normalizeText(payload?.comment)) {
+        throw new Error("A comment is required before adding a note.");
+      }
+
+      const response = await invokeCreatorCustomApi(customApis.addComment, {
+        recordId,
+        comment: payload.comment,
+        reviewer: payload.reviewer || "",
+        type: payload.commentType || "Internal Finance Note",
+      });
+
+      const normalized = normalizeApiEnvelope(response);
+
+      if (!isSuccessfulResponse(normalized)) {
+        throw new Error(normalized?.message || "Failed to add comment.");
+      }
+
       const detail = await this.loadInvoiceDetail(recordId);
       return detail.comments || [];
     },
@@ -421,10 +796,11 @@ async function initializeCreatorRuntime(config) {
 
   try {
     const initData = await creator.init();
-    const widgetParams =
-      typeof creator.UTIL?.getWidgetParams === "function"
-        ? creator.UTIL.getWidgetParams() || {}
-        : {};
+
+    let widgetParams = {};
+    if (typeof creator.UTIL?.getWidgetParams === "function") {
+      widgetParams = creator.UTIL.getWidgetParams() || {};
+    }
 
     return {
       creator,
@@ -432,13 +808,15 @@ async function initializeCreatorRuntime(config) {
       widgetParams,
       creatorReady: true,
     };
-  } catch {
+  } catch (error) {
+    console.error("Creator SDK init failed:", error);
+
     if (config.useMockData) {
       return null;
     }
 
     throw new Error(
-      "Zoho Creator SDK initialization failed. Re-enable mock mode or verify the widget runtime inside Creator.",
+      "Zoho Creator SDK initialization failed. Open the widget inside Zoho Creator or enable mock mode for local testing.",
     );
   }
 }
@@ -449,8 +827,15 @@ export async function createInvoiceApprovalService(config) {
   }
 
   const runtime = await initializeCreatorRuntime(config);
+
   if (!runtime) {
-    return createMockService(config);
+    if (config.useMockData) {
+      return createMockService(config);
+    }
+
+    throw new Error(
+      "Zoho Creator SDK was not found. This widget must run inside Zoho Creator when mock mode is disabled.",
+    );
   }
 
   return createCreatorService(config, runtime.creator, runtime);

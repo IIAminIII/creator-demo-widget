@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-  useMockData: true,
+  useMockData: false,
   creatorSdkUrl:
     "https://static.zohocdn.com/creator/widgets/version/2.0/widgetsdk-min.js",
   currentReviewerName: "Finance Ops Reviewer",
@@ -26,8 +26,9 @@ export const APP_CONFIG = {
       audit: "Invoice_Approval_Audit_Log",
     },
     customApis: {
-      loadInbox: "listInvoiceApprovalInbox",
-      loadInvoiceDetail: "getInvoiceApprovalDetail",
+      loadInbox: "listBooksInvoicesForApproval",
+      loadInvoiceDetail: "getBooksInvoiceDetails",
+      loadCrmContext: "getCrmContextForInvoice",
       approveInvoice: "approveInvoice",
       rejectInvoice: "rejectInvoice",
       requestClarification: "requestClarification",
@@ -53,7 +54,8 @@ export function getRuntimeConfig(widgetParams = {}) {
           widgetParams.approvalRequestsReportName ||
           APP_CONFIG.creator.reports.inbox,
         comments:
-          widgetParams.commentsReportName || APP_CONFIG.creator.reports.comments,
+          widgetParams.commentsReportName ||
+          APP_CONFIG.creator.reports.comments,
         audit:
           widgetParams.auditLogReportName || APP_CONFIG.creator.reports.audit,
       },
@@ -70,10 +72,16 @@ export function getRuntimeConfig(widgetParams = {}) {
         ...APP_CONFIG.creator.customApis,
         loadInbox:
           widgetParams.loadInboxFunctionName ||
+          widgetParams.getApprovalInboxFunctionName ||
           APP_CONFIG.creator.customApis.loadInbox,
         loadInvoiceDetail:
           widgetParams.loadInvoiceDetailFunctionName ||
+          widgetParams.getApprovalDetailFunctionName ||
           APP_CONFIG.creator.customApis.loadInvoiceDetail,
+        loadCrmContext:
+          widgetParams.loadCrmContextFunctionName ||
+          widgetParams.getCrmContextFunctionName ||
+          APP_CONFIG.creator.customApis.loadCrmContext,
         approveInvoice:
           widgetParams.approveInvoiceFunctionName ||
           APP_CONFIG.creator.customApis.approveInvoice,
@@ -85,6 +93,7 @@ export function getRuntimeConfig(widgetParams = {}) {
           APP_CONFIG.creator.customApis.requestClarification,
         addComment:
           widgetParams.addCommentFunctionName ||
+          widgetParams.addApprovalCommentFunctionName ||
           APP_CONFIG.creator.customApis.addComment,
       },
     },
