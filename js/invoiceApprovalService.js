@@ -822,21 +822,21 @@ async function initializeCreatorRuntime(config) {
 }
 
 export async function createInvoiceApprovalService(config) {
-  if (config.useMockData) {
+  const runtime = await initializeCreatorRuntime(config);
+
+  if (runtime && !config.useMockData) {
+    return createCreatorService(config, runtime.creator, runtime);
+  }
+
+  if (runtime && config.useMockData) {
     return createMockService(config);
   }
 
-  const runtime = await initializeCreatorRuntime(config);
-
   if (!runtime) {
-    if (config.useMockData) {
-      return createMockService(config);
-    }
-
-    throw new Error(
-      "Zoho Creator SDK was not found. This widget must run inside Zoho Creator when mock mode is disabled.",
+    console.warn(
+      "Zoho Creator SDK was not found. Falling back to mock preview mode.",
     );
   }
 
-  return createCreatorService(config, runtime.creator, runtime);
+  return createMockService(config);
 }

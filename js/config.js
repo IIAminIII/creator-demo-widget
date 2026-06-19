@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-  useMockData: false,
+  useMockData: true,
   creatorSdkUrl:
     "https://static.zohocdn.com/creator/widgets/version/2.0/widgetsdk-min.js",
   currentReviewerName: "Finance Ops Reviewer",
@@ -38,10 +38,18 @@ export const APP_CONFIG = {
 };
 
 export function getRuntimeConfig(widgetParams = {}) {
+  const useMockDataParam = widgetParams.useMockData;
+  const resolvedUseMockData =
+    useMockDataParam === true ||
+    useMockDataParam === "true"
+      ? true
+      : useMockDataParam === false || useMockDataParam === "false"
+        ? false
+        : APP_CONFIG.useMockData;
+
   return {
     ...APP_CONFIG,
-    useMockData:
-      widgetParams.useMockData === "false" ? false : APP_CONFIG.useMockData,
+    useMockData: resolvedUseMockData,
     currentReviewerName:
       widgetParams.currentReviewerName || APP_CONFIG.currentReviewerName,
     creator: {
