@@ -1,0 +1,106 @@
+// Creator function: listBooksInvoicesForApproval
+// Returns a list of Books invoices that need approval review.
+// Called by the widget inbox loader.
+//
+// Widget calls this via: api.invokeFunction("listBooksInvoicesForApproval", { status, search })
+// Expected response shape: { items: [InvoiceInboxItem], summary: { total, newCount, underReviewCount, clarificationCount, approvedCount, rejectedCount } }
+
+statusFilter = input.get("status");
+searchTerm   = input.get("search");
+
+// --- Fetch invoices from Zoho Books ---
+booksParams = Map();
+booksParams.put("status", "sent");                        // adjust for your approval queue criteria
+booksParams.put("per_page", "200");
+booksResponse = invokeurl
+[
+    url: "https://books.zoho.com/api/v3/invoices"
+    type: GET
+    parameters: booksParams
+    connection: "zoho_books"
+];
+
+rawInvoices = booksResponse.get("invoices");
+if (rawInvoices == null) {
+    rawInvoices = List();
+}
+
+items = List();
+for each invoice in rawInvoices {
+    customerId  = invoice.get("customer_id");
+    invoiceId   = invoice.get("invoice_id");
+    invoiceNum  = invoice.get("invoice_number");
+
+    // Look up existing Creator approval record for this Books invoice
+    approvalCriteria = 'Books_Invoice_ID == "' + invoiceId + '"';
+    existingRecords = zoho.creator.getRecords("your_app", "Pending_Invoice_Approvals", approvalCriteria, 1, 1, "zoho_creator");
+    approvalRecord = existingRecords.get(0);
+
+    approvalStatus = "New";
+    approvalRecordId = "";
+    priority = "Medium";
+    crmAccountName = "";
+
+    if (approvalRecord != null) {
+        approvalStatus   = approvalRecord.get("Approval_Status");
+        approvalRecordId = approvalRecord.get("ID");
+        priority         = approvalRecord.get("Priority");
+        crmAccountName   = approvalRecord.get("CRM_Account_Name");
+    }
+
+    // Apply widget filters
+    if (statusFilter != null && statusFilter != "" && statusFilter != "All") {
+        if (approvalStatus != statusFilter) {
+            continue;
+        }
+    }
+    if (searchTerm != null && searchTerm != "") {
+        lowerSearch  = searchTerm.toLowerCase();
+        lowerNum     = invoiceNum.toLowerCase();
+        lowerCustomer = invoice.get("customer_name").toLowerCase();
+        lowerAccount  = crmAccountName.toLowerCase();
+        if (!lowerNum.contains(lowerSearch) && !lowerCustomer.contains(lowerSearch) && !lowerAccount.contains(lowerSearch)) {
+            continue;
+        }
+    }
+
+    item = Map();
+    item.put("approvalRecordId", approvalRecordId);
+    item.put("booksInvoiceId",   invoiceId);
+    item.put("invoiceNumber",    invoiceNum);
+    item.put("customerName",     invoice.get("customer_name"));
+    item.put("invoiceTotal",     invoice.get("total").toDecimal());
+    item.put("currencyCode",     invoice.get("currency_code"));
+    item.put("dueDate",          invoice.get("due_date"));
+    item.put("booksStatus",      invoice.get("status"));
+    item.put("paymentStatus",    invoice.get("payment_terms_label"));
+    item.put("approvalStatus",   approvalStatus);
+    item.put("priority",         priority);
+    item.put("crmAccountName",   crmAccountName);
+    items.add(item);
+}
+
+// Build summary counts
+total = items.size();
+newCount = 0; underReview = 0; clarification = 0; approved = 0; rejected = 0;
+for each i in items {
+    s = i.get("approvalStatus");
+    if (s == "New") { newCount = newCount + 1; }
+    else if (s == "Under Review") { underReview = underReview + 1; }
+    else if (s == "Needs Clarification") { clarification = clarification + 1; }
+    else if (s == "Approved") { approved = approved + 1; }
+    else if (s == "Rejected") { rejected = rejected + 1; }
+}
+
+summary = Map();
+summary.put("total", total);
+summary.put("newCount", newCount);
+summary.put("underReviewCount", underReview);
+summary.put("clarificationCount", clarification);
+summary.put("approvedCount", approved);
+summary.put("rejectedCount", rejected);
+
+response = Map();
+response.put("items", items);
+response.put("summary", summary);
+return response;

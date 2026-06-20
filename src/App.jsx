@@ -1,211 +1,166 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
+import InvoiceDetail from "./components/InvoiceDetail";
+import InvoiceInbox from "./components/InvoiceInbox";
 import LoadingSpinner from "./components/LoadingSpinner";
-import RecordForm from "./components/RecordForm";
-import RecordsList from "./components/RecordsList";
 import { useCreator } from "./contexts/DataContext";
+import {
+  createInvoiceApprovalService,
+  resolveInvoiceApprovalConfig,
+} from "./services/invoiceApprovalService";
 
-function normalizeFieldsResponse(response) {
-  if (Array.isArray(response)) {
-    return response;
+function getErrorMessage(error, fallbackMessage) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
   }
 
-  if (Array.isArray(response?.fields)) {
-    return response.fields;
+  const candidates = [
+    error?.message,
+    error?.error,
+    error?.details,
+    error?.description,
+    error?.response?.message,
+    error?.response?.error,
+    error?.data?.message,
+    error?.data?.error,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
   }
 
-  if (Array.isArray(response?.data)) {
-    return response.data;
-  }
-
-  return [];
+  return fallbackMessage;
 }
 
-function getRecordId(record) {
-  return record?.ID ?? record?.id ?? record?.recordId ?? null;
+function StatCard({ label, value, helper }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
+      <p className="mt-1 text-sm text-slate-500">{helper}</p>
+    </div>
+  );
 }
 
 export default function App() {
   const {
     api,
+    creator,
     initData,
     initError,
     initLoading,
-    initParams,
-    isReady,
     widgetParams,
   } = useCreator();
-  const [appName, setAppName] = useState("");
-  const [formName, setFormName] = useState("");
-  const [reportName, setReportName] = useState("");
-  const [recordsData, setRecordsData] = useState(null);
-  const [fields, setFields] = useState([]);
-  const [metadata, setMetadata] = useState(null);
-  const [selectedRecord, setSelectedRecord] = useState(null);
-  const [listLoading, setListLoading] = useState(false);
-  const [formLoading, setFormLoading] = useState(false);
+
+  const config = useMemo(
+    () => resolveInvoiceApprovalConfig(widgetParams, initData),
+    [widgetParams, initData],
+  );
+  const service = useMemo(
+    () => createInvoiceApprovalService({ api, config, creator, initData }),
+    [api, config, creator, initData],
+  );
+
+  const [filters, setFilters] = useState({
+    search: "",
+    status: config.inboxDefaultStatusFilter || "All",
+  });
+  const [inboxItems, setInboxItems] = useState([]);
+  const [summary, setSummary] = useState({
+    total: 0,
+    newCount: 0,
+    underReviewCount: 0,
+    clarificationCount: 0,
+    approvedCount: 0,
+    rejectedCount: 0,
+  });
+  const [selectedRecordId, setSelectedRecordId] = useState("");
+  const [selectedDetail, setSelectedDetail] = useState(null);
+  const [inboxLoading, setInboxLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  useEffect(() => {
-    if (!initData && !initParams && !widgetParams) {
-      return;
-    }
-
-    if (!appName) {
-      const detectedAppName =
-        widgetParams?.appName ??
-        widgetParams?.app_name ??
-        initParams?.appLinkName ??
-        initData?.app_name ??
-        initData?.appName ??
-        initData?.context?.app_name;
-
-      if (detectedAppName) {
-        setAppName(detectedAppName);
-      }
-    }
-
-    if (!formName) {
-      const detectedFormName =
-        widgetParams?.formName ??
-        widgetParams?.form_name ??
-        widgetParams?.form ??
-        initData?.form_name ??
-        initData?.formName ??
-        initData?.context?.form_name;
-
-      if (detectedFormName) {
-        setFormName(detectedFormName);
-      }
-    }
-
-    if (!reportName) {
-      const detectedReportName =
-        widgetParams?.reportName ??
-        widgetParams?.report_name ??
-        widgetParams?.report ??
-        initData?.report_name ??
-        initData?.reportName ??
-        initData?.context?.report_name;
-
-      if (detectedReportName) {
-        setReportName(detectedReportName);
-      }
-    }
-  }, [appName, formName, reportName, initData, initParams, widgetParams]);
-
-  function getApiOptions() {
-    return appName ? { appName } : undefined;
-  }
-
-  async function loadFormData() {
-    if (!formName) {
-      setErrorMessage("Enter a Creator form name before loading metadata.");
-      return;
-    }
-
-    if (!reportName) {
-      setErrorMessage("Enter a Creator report name before loading records.");
-      return;
-    }
-
+  async function loadInbox(nextFilters = filters) {
+    setInboxLoading(true);
     setErrorMessage("");
-    setSuccessMessage("");
-    setListLoading(true);
 
     try {
-      const [recordsResponse, fieldsResponse, metadataResponse] =
-        await Promise.all([
-          api.getRecords(reportName, getApiOptions()),
-          api.getFormFields(formName, getApiOptions()),
-          api.getFormMetadata(formName, getApiOptions()),
-        ]);
+      const response = await service.loadInbox(nextFilters);
+      setInboxItems(response.items);
+      setSummary(response.summary);
 
-      setRecordsData(recordsResponse);
-      setFields(normalizeFieldsResponse(fieldsResponse));
-      setMetadata(metadataResponse);
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Failed to load Creator data.",
-      );
-    } finally {
-      setListLoading(false);
-    }
-  }
-
-  async function handleSave(values) {
-    if (!formName) {
-      setErrorMessage("Enter a Creator form name before submitting data.");
-      return;
-    }
-
-    if (selectedRecord && !reportName) {
-      setErrorMessage("Enter a Creator report name before updating records.");
-      return;
-    }
-
-    setFormLoading(true);
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    try {
-      if (selectedRecord) {
-        await api.updateRecord(
-          reportName,
-          getRecordId(selectedRecord),
-          values,
-          getApiOptions(),
-        );
-        setSuccessMessage("Record updated successfully.");
-      } else {
-        await api.addRecord(formName, values, getApiOptions());
-        setSuccessMessage("Record created successfully.");
+      if (!selectedRecordId && response.items[0]) {
+        setSelectedRecordId(response.items[0].approvalRecordId);
+      } else if (
+        selectedRecordId &&
+        !response.items.some((item) => item.approvalRecordId === selectedRecordId)
+      ) {
+        setSelectedRecordId(response.items[0]?.approvalRecordId ?? "");
       }
-
-      setSelectedRecord(null);
-      await loadFormData();
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Failed to save record.",
-      );
+      setErrorMessage(getErrorMessage(error, "Failed to load the invoice inbox."));
     } finally {
-      setFormLoading(false);
+      setInboxLoading(false);
     }
   }
 
-  async function handleDelete(record) {
-    const recordId = getRecordId(record);
-
-    if (!reportName) {
-      setErrorMessage("Enter a Creator report name before deleting records.");
-      return;
-    }
-
+  async function loadDetail(recordId) {
     if (!recordId) {
-      setErrorMessage("This record does not have a detectable ID to delete.");
+      setSelectedDetail(null);
       return;
     }
 
+    setDetailLoading(true);
     setErrorMessage("");
-    setSuccessMessage("");
-    setListLoading(true);
 
     try {
-      await api.deleteRecord(reportName, recordId, getApiOptions());
-      setSuccessMessage("Record deleted successfully.");
-      await loadFormData();
+      const detail = await service.loadInvoiceDetail(recordId);
+      setSelectedDetail(detail);
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Failed to delete record.",
-      );
+      setErrorMessage(getErrorMessage(error, "Failed to load the invoice detail."));
     } finally {
-      setListLoading(false);
+      setDetailLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadInbox({
+      search: "",
+      status: config.inboxDefaultStatusFilter || "All",
+    });
+  }, [service, config.inboxDefaultStatusFilter]);
+
+  useEffect(() => {
+    if (selectedRecordId) {
+      loadDetail(selectedRecordId);
+    }
+  }, [selectedRecordId]);
+
+  async function runAction(action) {
+    setActionLoading(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const detail = await action();
+      setSelectedDetail(detail);
+      await loadInbox();
+      setSuccessMessage("Workflow action completed successfully.");
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, "The workflow action could not be completed."));
+    } finally {
+      setActionLoading(false);
     }
   }
 
   if (initLoading) {
-    return <LoadingSpinner label="Initializing Zoho Creator widget..." />;
+    return <LoadingSpinner label="Initializing invoice approval widget..." />;
   }
 
   if (initError) {
@@ -222,139 +177,179 @@ export default function App() {
     <main className="app-shell">
       <section className="hero-panel">
         <div className="space-y-4">
-          <span className="badge badge-primary badge-outline">Zoho Creator</span>
+          <span className="badge badge-primary badge-outline">Books + CRM + Creator</span>
           <div>
             <h1 className="text-3xl font-black tracking-tight text-slate-900">
-              Creator Demo Widget
+              Invoice Approval Gateway
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-              This starter widget initializes the Zoho Creator SDK, loads form
-              metadata plus report records, and demonstrates a simple CRUD
-              workflow you can adapt to your Creator app.
+              Zoho Books stays canonical for invoice facts, Zoho Creator handles
+              internal approval workflow, and Zoho CRM adds customer and deal
+              context for review decisions.
             </p>
           </div>
         </div>
 
-        <div className="stats stats-vertical border border-slate-200 bg-white text-slate-900 shadow-sm md:stats-horizontal">
-          <div className="stat">
-            <div className="stat-title text-slate-500">SDK status</div>
-            <div className="stat-value text-lg text-success">Ready</div>
-            <div className="stat-desc text-slate-500">
-              {isReady ? "ZOHO.CREATOR detected" : "Waiting"}
-            </div>
-          </div>
-          <div className="stat">
-            <div className="stat-title text-slate-500">Detected form / report</div>
-            <div className="stat-value truncate text-lg">
-              {formName || reportName
-                ? `${formName || "?"} / ${reportName || "?"}`
-                : "Not set"}
-            </div>
-            <div className="stat-desc text-slate-500">Override them below if needed</div>
-          </div>
-          <div className="stat">
-            <div className="stat-title text-slate-500">Mapped app</div>
-            <div className="stat-value truncate text-lg">
-              {appName || "Current app"}
-            </div>
-            <div className="stat-desc text-slate-500">From widget params or current session</div>
-          </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <StatCard
+            label="Mode"
+            value={service.mode === "mock" ? "Local preview" : "Creator runtime"}
+            helper={
+              service.mode === "mock"
+                ? "Using mock invoices until Creator forms and functions are wired."
+                : "Reading approval data from Creator-backed forms."
+            }
+          />
+          <StatCard
+            label="Pending queue"
+            value={summary.newCount + summary.underReviewCount + summary.clarificationCount}
+            helper={`${summary.total} invoice(s) currently in the inbox`}
+          />
+          <StatCard
+            label="Connected app"
+            value={config.creatorAppName || "Current app"}
+            helper="Configured through widget params or local defaults"
+          />
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="space-y-6">
-          <div className="widget-surface p-5">
-            <div className="mb-4 flex flex-wrap items-end gap-3">
-              <label className="widget-field">
-                <span className="widget-label">Application name</span>
-                <input
-                  className="widget-input"
-                  type="text"
-                  placeholder="Leave empty for current app"
-                  value={appName}
-                  onChange={(event) => setAppName(event.target.value)}
-                />
-              </label>
-              <label className="widget-field">
-                <span className="widget-label">Form name</span>
-                <input
-                  className="widget-input"
-                  type="text"
-                  placeholder="Orders"
-                  value={formName}
-                  onChange={(event) => setFormName(event.target.value)}
-                />
-              </label>
-              <label className="widget-field">
-                <span className="widget-label">Report name</span>
-                <input
-                  className="widget-input"
-                  type="text"
-                  placeholder="All_Orders"
-                  value={reportName}
-                  onChange={(event) => setReportName(event.target.value)}
-                />
-              </label>
-              <button
-                type="button"
-                className="widget-primary-button"
-                onClick={loadFormData}
-                disabled={!isReady || listLoading}
-              >
-                {listLoading ? "Loading..." : "Load Creator data"}
-              </button>
-            </div>
-
-            {errorMessage ? (
-              <div className="alert alert-error mb-3">
-                <span>{errorMessage}</span>
-              </div>
-            ) : null}
-
-            {successMessage ? (
-              <div className="alert alert-success">
-                <span>{successMessage}</span>
-              </div>
-            ) : null}
-          </div>
-
-          <RecordsList
-            loading={listLoading}
-            recordsData={recordsData}
-            onEdit={setSelectedRecord}
-            onDelete={handleDelete}
-          />
+      <section className="widget-surface p-5">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="widget-field">
+            <span className="widget-label">Search invoices</span>
+            <input
+              className="widget-input"
+              placeholder="Invoice number, customer, or CRM account"
+              value={filters.search}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, search: event.target.value }))
+              }
+            />
+          </label>
+          <label className="widget-field">
+            <span className="widget-label">Approval status</span>
+            <select
+              className="widget-input"
+              value={filters.status}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, status: event.target.value }))
+              }
+            >
+              <option value="All">All</option>
+              <option value="New">New</option>
+              <option value="Under Review">Under Review</option>
+              <option value="Needs Clarification">Needs Clarification</option>
+              <option value="Approved">Approved</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="widget-primary-button"
+            onClick={() => loadInbox(filters)}
+            disabled={inboxLoading}
+          >
+            {inboxLoading ? "Refreshing..." : "Refresh inbox"}
+          </button>
         </div>
 
-        <div className="space-y-6">
-          <RecordForm
-            fields={fields}
-            initialRecord={selectedRecord}
-            loading={formLoading}
-            onCancel={() => setSelectedRecord(null)}
-            onSubmit={handleSave}
-          />
-
-          <div className="widget-surface p-5">
-            <h3 className="font-semibold text-slate-900">Context snapshot</h3>
-            <p className="widget-muted mt-2 text-sm">
-              Useful while wiring this demo to your real Creator application.
-            </p>
-            <pre className="mt-4 max-h-80 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
-              {JSON.stringify(
-                {
-                  initData,
-                  initParams,
-                  metadata,
-                  widgetParams,
-                },
-                null,
-                2,
-              )}
-            </pre>
-          </div>
+        <div className="mt-5 flex flex-wrap gap-3 text-sm">
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+            New: {summary.newCount}
+          </span>
+          <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">
+            Under review: {summary.underReviewCount}
+          </span>
+          <span className="rounded-full bg-rose-50 px-3 py-1 text-rose-700">
+            Clarification: {summary.clarificationCount}
+          </span>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
+            Approved: {summary.approvedCount}
+          </span>
         </div>
+
+        {errorMessage ? (
+          <div className="alert alert-error mt-5">
+            <span>{errorMessage}</span>
+          </div>
+        ) : null}
+
+        {successMessage ? (
+          <div className="alert alert-success mt-5">
+            <span>{successMessage}</span>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <InvoiceInbox
+          items={inboxItems}
+          loading={inboxLoading}
+          selectedRecordId={selectedRecordId}
+          onSelect={setSelectedRecordId}
+        />
+
+        <InvoiceDetail
+          detail={selectedDetail}
+          loading={detailLoading}
+          actionLoading={actionLoading}
+          onRefresh={() =>
+            runAction(async () => {
+              const refreshed = await service.refreshInvoice(selectedDetail.booksInvoiceId);
+              if (selectedRecordId) {
+                return service.loadInvoiceDetail(selectedRecordId);
+              }
+              return refreshed;
+            })
+          }
+          onApprove={(payload) =>
+            runAction(() => service.approveInvoice(selectedRecordId, payload))
+          }
+          onReject={(payload) =>
+            runAction(() => service.rejectInvoice(selectedRecordId, payload))
+          }
+          onClarify={(payload) =>
+            runAction(() => service.requestClarification(selectedRecordId, payload))
+          }
+          onAddComment={(payload) =>
+            runAction(async () => {
+              await service.addComment(selectedRecordId, payload);
+              return service.loadInvoiceDetail(selectedRecordId);
+            })
+          }
+        />
+      </section>
+
+      <section className="mt-6 widget-surface p-5">
+        <h3 className="font-semibold text-slate-900">Integration contract snapshot</h3>
+        <p className="widget-muted mt-2 text-sm">
+          This is the frontend contract and widget configuration the Creator-side
+          integration layer should satisfy.
+        </p>
+        <pre className="mt-4 max-h-96 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+          {JSON.stringify(
+            {
+              config,
+              runtimeMode: service.mode,
+              requiredFunctions: [
+                "listBooksInvoicesForApproval",
+                "getBooksInvoiceDetails",
+                "getCrmContextForInvoice",
+                "approveInvoice",
+                "rejectInvoice",
+                "requestClarification",
+                "addApprovalComment",
+              ],
+              requiredCreatorEntities: [
+                "Invoice_Approval_Requests",
+                "Invoice_Approval_Comments",
+                "Invoice_Approval_Audit_Log",
+              ],
+            },
+            null,
+            2,
+          )}
+        </pre>
       </section>
     </main>
   );

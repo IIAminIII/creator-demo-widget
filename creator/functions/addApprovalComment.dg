@@ -1,0 +1,50 @@
+// Creator function: addApprovalComment
+// Adds a standalone internal note without changing approval status.
+//
+// Widget calls this via: api.invokeFunction("addApprovalComment", { recordId, reviewer, comment, type })
+// Expected response: { success: true }
+
+recordId = input.get("recordId");
+reviewer = input.get("reviewer");
+comment  = input.get("comment");
+type     = input.get("type");
+
+if (recordId == null || recordId == "") {
+    error = Map();
+    error.put("error", "recordId is required");
+    return error;
+}
+
+if (comment == null || comment == "") {
+    error = Map();
+    error.put("error", "Comment body is required");
+    return error;
+}
+
+now = zoho.currenttime.toString();
+commentType = "Internal note";
+if (type != null && type != "") {
+    commentType = type;
+}
+
+// --- Add comment ---
+commentRecord = Map();
+commentRecord.put("Approval_Request_ID", recordId);
+commentRecord.put("Author",              reviewer);
+commentRecord.put("Comment_Type",        commentType);
+commentRecord.put("Comment_Body",        comment);
+commentRecord.put("Created_At",          now);
+zoho.creator.addRecord("your_app", "Invoice_Approval_Comments", commentRecord, "zoho_creator");
+
+// --- Add audit event ---
+auditRecord = Map();
+auditRecord.put("Approval_Request_ID", recordId);
+auditRecord.put("Event_Type",          "Comment added");
+auditRecord.put("Event_Summary",       "Reviewer added a comment.");
+auditRecord.put("Actor",               reviewer);
+auditRecord.put("Created_At",          now);
+zoho.creator.addRecord("your_app", "Invoice_Approval_Audit_Log", auditRecord, "zoho_creator");
+
+result = Map();
+result.put("success", true);
+return result;

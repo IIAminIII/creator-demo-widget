@@ -1,0 +1,78 @@
+// Creator function: getBooksInvoiceDetails
+// Fetches a full Books invoice snapshot and optionally refreshes the Creator approval record.
+// Called when the widget opens a detail view or the user clicks "Refresh from Books".
+//
+// Widget calls this via: api.invokeFunction("getBooksInvoiceDetails", { invoiceId, mode })
+// mode = "refresh" forces a re-sync; any other value is a normal fetch.
+// Expected response shape: InvoiceDetail (see creator/function-contracts.json)
+
+invoiceId = input.get("invoiceId");
+mode      = input.get("mode");
+
+if (invoiceId == null || invoiceId == "") {
+    error = Map();
+    error.put("error", "invoiceId is required");
+    return error;
+}
+
+// --- Fetch invoice from Zoho Books ---
+booksResponse = invokeurl
+[
+    url: "https://books.zoho.com/api/v3/invoices/" + invoiceId
+    type: GET
+    connection: "zoho_books"
+];
+
+invoice = booksResponse.get("invoice");
+if (invoice == null) {
+    error = Map();
+    error.put("error", "Invoice not found in Zoho Books");
+    return error;
+}
+
+// --- Normalize line items ---
+rawLineItems = invoice.get("line_items");
+if (rawLineItems == null) { rawLineItems = List(); }
+lineItems = List();
+for each li in rawLineItems {
+    lineItem = Map();
+    lineItem.put("id",          li.get("line_item_id"));
+    lineItem.put("description", li.get("description"));
+    lineItem.put("quantity",    li.get("quantity").toDecimal());
+    lineItem.put("rate",        li.get("rate").toDecimal());
+    lineItem.put("total",       li.get("item_total").toDecimal());
+    lineItems.add(lineItem);
+}
+
+// --- Refresh the Creator approval record snapshot if needed ---
+now = zoho.currenttime.toString();
+if (mode == "refresh") {
+    approvalCriteria = 'Books_Invoice_ID == "' + invoiceId + '"';
+    existingRecords = zoho.creator.getRecords("your_app", "Pending_Invoice_Approvals", approvalCriteria, 1, 1, "zoho_creator");
+    if (existingRecords.size() > 0) {
+        approvalRecord = existingRecords.get(0);
+        recordId = approvalRecord.get("ID");
+        updateMap = Map();
+        updateMap.put("Invoice_Total",         invoice.get("total").toDecimal());
+        updateMap.put("Due_Date",              invoice.get("due_date"));
+        updateMap.put("Books_Invoice_Status",  invoice.get("status"));
+        updateMap.put("Books_Payment_Status",  invoice.get("payment_status"));
+        updateMap.put("Last_Books_Sync_At",    now);
+        zoho.creator.updateRecord("your_app", "Invoice_Approval_Requests", recordId, updateMap, "zoho_creator");
+    }
+}
+
+// --- Build normalized InvoiceDetail response ---
+result = Map();
+result.put("booksInvoiceId",   invoiceId);
+result.put("invoiceNumber",    invoice.get("invoice_number"));
+result.put("customerName",     invoice.get("customer_name"));
+result.put("invoiceTotal",     invoice.get("total").toDecimal());
+result.put("currencyCode",     invoice.get("currency_code"));
+result.put("dueDate",          invoice.get("due_date"));
+result.put("invoiceDate",      invoice.get("date"));
+result.put("booksStatus",      invoice.get("status"));
+result.put("paymentStatus",    invoice.get("payment_status"));
+result.put("lineItems",        lineItems);
+result.put("lastBooksSyncAt",  now);
+return result;

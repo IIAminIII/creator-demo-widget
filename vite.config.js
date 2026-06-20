@@ -1,9 +1,6 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
   server: {
     allowedHosts: [".trycloudflare.com"],
   },
@@ -12,5 +9,11 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    rollupOptions: {
+      input: {
+        index: "index.html",
+        widget: "widget.html",
+      },
+    },
   },
 });

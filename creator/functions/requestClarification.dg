@@ -1,0 +1,55 @@
+// Creator function: requestClarification
+// Puts an invoice into "Needs Clarification" state with a required reason.
+// Invoice stays in queue until approved or rejected.
+//
+// Widget calls this via: api.invokeFunction("requestClarification", { recordId, comment, reviewer, exceptionReason })
+// Expected response: { success: true }
+
+recordId        = input.get("recordId");
+comment         = input.get("comment");
+reviewer        = input.get("reviewer");
+exceptionReason = input.get("exceptionReason");
+
+if (recordId == null || recordId == "") {
+    error = Map();
+    error.put("error", "recordId is required");
+    return error;
+}
+
+if (exceptionReason == null || exceptionReason == "") {
+    error = Map();
+    error.put("error", "A clarification reason is required");
+    return error;
+}
+
+now = zoho.currenttime.toString();
+
+// --- Update Creator approval record ---
+updateMap = Map();
+updateMap.put("Approval_Status",   "Needs Clarification");
+updateMap.put("Reviewer_Notes",    comment);
+updateMap.put("Assigned_Reviewer", reviewer);
+updateMap.put("Exception_Reason",  exceptionReason);
+zoho.creator.updateRecord("your_app", "Invoice_Approval_Requests", recordId, updateMap, "zoho_creator");
+
+// --- Add clarification comment ---
+commentRecord = Map();
+commentRecord.put("Approval_Request_ID", recordId);
+commentRecord.put("Author",              reviewer);
+commentRecord.put("Comment_Type",        "Clarification");
+commentRecord.put("Comment_Body",        comment);
+commentRecord.put("Created_At",          now);
+zoho.creator.addRecord("your_app", "Invoice_Approval_Comments", commentRecord, "zoho_creator");
+
+// --- Add audit event ---
+auditRecord = Map();
+auditRecord.put("Approval_Request_ID", recordId);
+auditRecord.put("Event_Type",          "Needs Clarification");
+auditRecord.put("Event_Summary",       "Clarification requested: " + exceptionReason + ".");
+auditRecord.put("Actor",               reviewer);
+auditRecord.put("Created_At",          now);
+zoho.creator.addRecord("your_app", "Invoice_Approval_Audit_Log", auditRecord, "zoho_creator");
+
+result = Map();
+result.put("success", true);
+return result;

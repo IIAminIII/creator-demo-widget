@@ -1,0 +1,67 @@
+// Creator function: getCrmContextForInvoice
+// Looks up CRM Account and Deal context for a given customer reference.
+// Called as enrichment when building the invoice detail view.
+// CRM enrichment failure must never block approval — return empty fields, not an error.
+//
+// Widget calls this via: api.invokeFunction("getCrmContextForInvoice", { customerId, customerName })
+// Expected response shape: { accountName, dealName, accountManager, segment, renewalWindow }
+
+customerId   = input.get("customerId");
+customerName = input.get("customerName");
+
+accountName   = "";
+dealName      = "";
+accountManager = "";
+segment       = "";
+renewalWindow = "";
+
+// --- Search CRM Accounts ---
+crmSearchUrl = "https://www.zohoapis.com/crm/v2/Accounts/search";
+crmParams    = Map();
+if (customerName != null && customerName != "") {
+    crmParams.put("criteria", "(Account_Name:equals:" + customerName + ")");
+}
+crmResponse = invokeurl
+[
+    url: crmSearchUrl
+    type: GET
+    parameters: crmParams
+    connection: "zoho_crm"
+];
+
+crmAccounts = crmResponse.get("data");
+if (crmAccounts != null && crmAccounts.size() > 0) {
+    account       = crmAccounts.get(0);
+    accountName   = account.get("Account_Name");
+    segment       = account.get("Industry");
+    // Account owner
+    ownerMap      = account.get("Owner");
+    if (ownerMap != null) {
+        accountManager = ownerMap.get("name");
+    }
+    accountId = account.get("id");
+
+    // --- Look up related Deals ---
+    dealsUrl    = "https://www.zohoapis.com/crm/v2/Accounts/" + accountId + "/Deals";
+    dealsResponse = invokeurl
+    [
+        url: dealsUrl
+        type: GET
+        connection: "zoho_crm"
+    ];
+    deals = dealsResponse.get("data");
+    if (deals != null && deals.size() > 0) {
+        latestDeal    = deals.get(0);
+        dealName      = latestDeal.get("Deal_Name");
+        closeDate     = latestDeal.get("Closing_Date");
+        renewalWindow = closeDate;
+    }
+}
+
+result = Map();
+result.put("accountName",    accountName);
+result.put("dealName",       dealName);
+result.put("accountManager", accountManager);
+result.put("segment",        segment);
+result.put("renewalWindow",  renewalWindow);
+return result;

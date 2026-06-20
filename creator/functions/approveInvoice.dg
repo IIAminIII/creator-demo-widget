@@ -1,0 +1,69 @@
+// Creator function: approveInvoice
+// Records an approval decision in Creator and optionally pushes it back to Zoho Books.
+// Writes a comment and audit event; stamps actor and timestamp.
+//
+// Widget calls this via: api.invokeFunction("approveInvoice", { recordId, decision, comment, reviewer })
+// Expected response: { success: true }
+
+recordId  = input.get("recordId");
+comment   = input.get("comment");
+reviewer  = input.get("reviewer");
+
+if (recordId == null || recordId == "") {
+    error = Map();
+    error.put("error", "recordId is required");
+    return error;
+}
+
+now = zoho.currenttime.toString();
+
+// --- Update Creator approval record ---
+updateMap = Map();
+updateMap.put("Approval_Status",         "Approved");
+updateMap.put("Reviewer_Notes",          comment);
+updateMap.put("Assigned_Reviewer",       reviewer);
+updateMap.put("Approval_Decision_Date",  now);
+zoho.creator.updateRecord("your_app", "Invoice_Approval_Requests", recordId, updateMap, "zoho_creator");
+
+// --- Add approval comment ---
+commentRecord = Map();
+commentRecord.put("Approval_Request_ID", recordId);
+commentRecord.put("Author",              reviewer);
+commentRecord.put("Comment_Type",        "Approval note");
+commentRecord.put("Comment_Body",        comment);
+commentRecord.put("Created_At",          now);
+zoho.creator.addRecord("your_app", "Invoice_Approval_Comments", commentRecord, "zoho_creator");
+
+// --- Add audit event ---
+auditRecord = Map();
+auditRecord.put("Approval_Request_ID", recordId);
+auditRecord.put("Event_Type",          "Approved");
+auditRecord.put("Event_Summary",       "Invoice approved by " + reviewer + ".");
+auditRecord.put("Actor",               reviewer);
+auditRecord.put("Created_At",          now);
+zoho.creator.addRecord("your_app", "Invoice_Approval_Audit_Log", auditRecord, "zoho_creator");
+
+// --- Optionally push approval status back to Zoho Books ---
+// Fetch the Books invoice ID from the Creator record
+approvalRecord = zoho.creator.getRecordById("your_app", "Pending_Invoice_Approvals", recordId, "zoho_creator");
+booksInvoiceId = approvalRecord.get("Books_Invoice_ID");
+
+if (booksInvoiceId != null && booksInvoiceId != "") {
+    // Books does not have a generic "approved" status — adapt to your workflow:
+    // e.g., mark as accepted, trigger payment, or leave as-is.
+    // Uncomment and adjust as needed:
+    //
+    // booksUpdate = Map();
+    // booksUpdate.put("status", "accepted");
+    // invokeurl
+    // [
+    //     url: "https://books.zoho.com/api/v3/invoices/" + booksInvoiceId
+    //     type: PUT
+    //     parameters: booksUpdate.toString()
+    //     connection: "zoho_books"
+    // ];
+}
+
+result = Map();
+result.put("success", true);
+return result;

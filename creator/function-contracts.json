@@ -1,0 +1,76 @@
+{
+  "InvoiceInboxItem": {
+    "approvalRecordId": "string",
+    "booksInvoiceId": "string",
+    "invoiceNumber": "string",
+    "customerName": "string",
+    "invoiceTotal": "number",
+    "currencyCode": "string",
+    "dueDate": "string",
+    "booksStatus": "string",
+    "paymentStatus": "string",
+    "approvalStatus": "string",
+    "priority": "string",
+    "crmAccountName": "string"
+  },
+  "InvoiceDetail": {
+    "approvalRecordId": "string",
+    "booksInvoiceId": "string",
+    "invoiceNumber": "string",
+    "customerName": "string",
+    "invoiceTotal": "number",
+    "currencyCode": "string",
+    "dueDate": "string",
+    "invoiceDate": "string",
+    "booksStatus": "string",
+    "paymentStatus": "string",
+    "approvalStatus": "string",
+    "priority": "string",
+    "assignedReviewer": "string",
+    "exceptionReason": "string",
+    "reviewerNotes": "string",
+    "decisionDate": "string",
+    "lastBooksSyncAt": "string",
+    "lastCrmEnrichmentAt": "string",
+    "lineItems": [
+      {
+        "id": "string",
+        "description": "string",
+        "quantity": "number",
+        "rate": "number",
+        "total": "number"
+      }
+    ],
+    "crmContext": {
+      "accountName": "string",
+      "dealName": "string",
+      "accountManager": "string",
+      "segment": "string",
+      "renewalWindow": "string"
+    },
+    "comments": [
+      {
+        "id": "string",
+        "author": "string",
+        "type": "string",
+        "body": "string",
+        "createdAt": "string"
+      }
+    ],
+    "audit": [
+      {
+        "id": "string",
+        "eventType": "string",
+        "summary": "string",
+        "actor": "string",
+        "createdAt": "string"
+      }
+    ]
+  },
+  "ApprovalActionPayload": {
+    "decision": "string",
+    "comment": "string",
+    "reviewer": "string",
+    "exceptionReason": "string"
+  }
+}
