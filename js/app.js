@@ -109,12 +109,12 @@ function renderKpis() {
 
   const cards = [
     {
-      label: "Runtime mode",
-      value: state.service?.mode === "creator" ? "Creator mode" : "Mock mode",
+      label: "Environment",
+      value: state.service?.mode === "creator" ? "Creator Live" : "Preview",
       helper:
         state.service?.mode === "creator"
-          ? "Ready to call Creator custom APIs."
-          : "Using local preview data with action simulation.",
+          ? "Creator APIs available."
+          : "Local data and simulated actions.",
     },
     {
       label: "Pending queue",
@@ -162,12 +162,14 @@ function renderToolbarSummary() {
 
 function renderInbox() {
   if (state.loadingInbox) {
+    elements.inboxList.classList.remove("scrollable");
     elements.inboxList.innerHTML =
       '<div class="loading-state">Loading invoice inbox...</div>';
     return;
   }
 
   if (!state.inboxItems.length) {
+    elements.inboxList.classList.remove("scrollable");
     elements.inboxList.innerHTML = `
       <div class="empty-state">
         <h3>No invoice records match the current filters</h3>
@@ -177,6 +179,7 @@ function renderInbox() {
     return;
   }
 
+  elements.inboxList.classList.toggle("scrollable", state.inboxItems.length > 6);
   elements.inboxList.innerHTML = state.inboxItems
     .map((item) => {
       const activeClass =
@@ -382,42 +385,6 @@ function renderDetail() {
         </div>
       </article>
 
-      <article class="detail-card">
-        <div class="section-tag tag-crm">CRM Context</div>
-        <h3>Read-only commercial context</h3>
-        <div class="meta-grid">
-          <div class="mini-card">
-            <div class="mini-label">Account</div>
-            <div class="mini-value">${escapeHtml(crm.crmAccountName || "Not enriched")}</div>
-          </div>
-          <div class="mini-card">
-            <div class="mini-label">Deal</div>
-            <div class="mini-value">${escapeHtml(crm.crmDealName || "Not enriched")}</div>
-          </div>
-          <div class="mini-card">
-            <div class="mini-label">Account owner</div>
-            <div class="mini-value">${escapeHtml(crm.accountOwner || "Not enriched")}</div>
-          </div>
-          <div class="mini-card">
-            <div class="mini-label">Deal stage</div>
-            <div class="mini-value">${escapeHtml(crm.dealStage || "Not enriched")}</div>
-          </div>
-          <div class="mini-card">
-            <div class="mini-label">Risk level</div>
-            <div class="mini-value">${escapeHtml(crm.riskLevel || "Unknown")}</div>
-          </div>
-          <div class="mini-card">
-            <div class="mini-label">Last CRM activity</div>
-            <div class="mini-value">${escapeHtml(
-              formatShortDate(crm.lastActivityDate),
-            )}</div>
-          </div>
-        </div>
-        <p class="section-hint">
-          CRM remains context-only. Approval actions should still work even if this data is delayed or missing.
-        </p>
-      </article>
-
       <article class="detail-card action-card">
         <div class="section-tag tag-creator">Creator Workflow</div>
         <h3>Approval controls</h3>
@@ -471,6 +438,42 @@ function renderDetail() {
               : "Not decided",
           )}</span>
         </div>
+      </article>
+
+      <article class="detail-card">
+        <div class="section-tag tag-crm">CRM Context</div>
+        <h3>Read-only commercial context</h3>
+        <div class="meta-grid">
+          <div class="mini-card">
+            <div class="mini-label">Account</div>
+            <div class="mini-value">${escapeHtml(crm.crmAccountName || "Not enriched")}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Deal</div>
+            <div class="mini-value">${escapeHtml(crm.crmDealName || "Not enriched")}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Account owner</div>
+            <div class="mini-value">${escapeHtml(crm.accountOwner || "Not enriched")}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Deal stage</div>
+            <div class="mini-value">${escapeHtml(crm.dealStage || "Not enriched")}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Risk level</div>
+            <div class="mini-value">${escapeHtml(crm.riskLevel || "Unknown")}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Last CRM activity</div>
+            <div class="mini-value">${escapeHtml(
+              formatShortDate(crm.lastActivityDate),
+            )}</div>
+          </div>
+        </div>
+        <p class="section-hint">
+          CRM remains context-only. Approval actions should still work even if this data is delayed or missing.
+        </p>
       </article>
 
       <article class="detail-card">
@@ -540,11 +543,11 @@ function wireDetailActions() {
 
 function updateRuntimeHeader() {
   elements.runtimePill.textContent =
-    state.service?.mode === "creator" ? "Creator custom API mode" : "Mock preview mode";
+    state.service?.mode === "creator" ? "Creator Live" : "Preview mode";
   elements.headerNote.textContent =
     state.service?.mode === "creator"
-      ? "Widget initialized inside Zoho Creator and ready to call configured custom APIs."
-      : "Using local mock data only. No Zoho Books or CRM API calls are happening in this MVP.";
+      ? "Live Creator environment with configured workflow APIs."
+      : "Local preview data only.";
 }
 
 async function loadInbox() {
