@@ -8,6 +8,16 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeApprovalStatus(value) {
+  const normalized = normalizeText(value);
+
+  if (!normalized || normalized === "New") {
+    return "Pending Review";
+  }
+
+  return normalized;
+}
+
 function findRecordIndex(state, recordId) {
   return state.findIndex((entry) => entry.approvalRecordId === recordId);
 }
@@ -65,11 +75,11 @@ function getSummary(items) {
   };
 
   items.forEach((item) => {
-    if (item.priority === "High") {
+    if (item.priority === "High" || item.priority === "Urgent") {
       summary.highPriorityCount += 1;
     }
 
-    if (item.approvalStatus === "New") {
+    if (normalizeApprovalStatus(item.approvalStatus) === "Pending Review") {
       summary.newCount += 1;
     }
     if (item.approvalStatus === "Under Review") {
@@ -380,7 +390,9 @@ function mapApprovalRecord(record) {
     paymentStatus: String(
       getNestedValue(record, ["Books_Payment_Status"], "Unknown"),
     ),
-    approvalStatus: String(getNestedValue(record, ["Approval_Status"], "New")),
+    approvalStatus: normalizeApprovalStatus(
+      getNestedValue(record, ["Approval_Status"], "Pending Review"),
+    ),
     priority: String(getNestedValue(record, ["Priority"], "Medium")),
     assignedReviewer: String(
       getNestedValue(record, ["Assigned_Reviewer"], "Unassigned"),
@@ -397,7 +409,11 @@ function mapApprovalRecord(record) {
     crmAccountName: String(getNestedValue(record, ["CRM_Account_Name"], "")),
     crmDealName: String(getNestedValue(record, ["CRM_Deal_Name"], "")),
     accountOwner: String(
-      getNestedValue(record, ["CRM_Account_Owner", "Account_Owner"], ""),
+      getNestedValue(
+        record,
+        ["CRM_Owner_Name", "CRM_Account_Owner", "Account_Owner", "Account_Manager"],
+        "",
+      ),
     ),
     dealStage: String(getNestedValue(record, ["CRM_Deal_Stage"], "")),
     riskLevel: String(getNestedValue(record, ["CRM_Risk_Level"], "")),
@@ -408,11 +424,19 @@ function mapApprovalRecord(record) {
 function mapCommentRecord(record) {
   return {
     id: String(getNestedValue(record, ["ID", "id"], `COM-${Date.now()}`)),
-    commentType: String(getNestedValue(record, ["Comment_Type"], "Internal Note")),
-    comment: String(getNestedValue(record, ["Comment_Body", "Comment"], "")),
-    addedBy: String(getNestedValue(record, ["Author", "Created_By"], "System")),
+    commentType: String(
+      getNestedValue(record, ["Comment_Type", "Type"], "General"),
+    ),
+    comment: String(getNestedValue(record, ["Comment_Body", "Comment", "Notes"], "")),
+    addedBy: String(
+      getNestedValue(record, ["Author", "Added_By", "Created_By"], "System"),
+    ),
     addedDate: toIsoOrEmpty(
-      getNestedValue(record, ["Created_At", "Modified_Time"], ""),
+      getNestedValue(
+        record,
+        ["Created_At", "Added_Date", "Added_Time", "Modified_Time"],
+        "",
+      ),
     ),
   };
 }
@@ -426,15 +450,25 @@ function mapAuditRecord(record) {
     eventMessage: String(
       getNestedValue(record, ["Event_Summary", "Summary"], "Activity logged."),
     ),
-    actor: String(getNestedValue(record, ["Actor", "Created_By"], "System")),
+    actor: String(
+      getNestedValue(record, ["Actor", "Added_By", "Created_By"], "System"),
+    ),
     eventDate: toIsoOrEmpty(
-      getNestedValue(record, ["Created_At", "Modified_Time"], ""),
+      getNestedValue(
+        record,
+        ["Created_At", "Added_Date", "Added_Time", "Modified_Time"],
+        "",
+      ),
     ),
     externalSystem: String(
       getNestedValue(record, ["External_System"], "Creator"),
     ),
     externalReferenceId: String(
-      getNestedValue(record, ["External_Reference_ID", "Approval_Request_ID"], ""),
+      getNestedValue(
+        record,
+        ["External_Reference_ID", "Approval_Request_ID", "Approval_Request"],
+        "",
+      ),
     ),
   };
 }
@@ -498,6 +532,18 @@ async function invokeCreatorCustomApi(apiName, payload = {}) {
   return unwrapCreatorApiResponse(response);
 }
 
+async function tryInvokeCreatorCustomApi(apiName, payload = {}) {
+  if (!apiName || !window.ZOHO?.CREATOR?.API?.invokeCustomApi) {
+    return null;
+  }
+
+  try {
+    return await invokeCreatorCustomApi(apiName, payload);
+  } catch {
+    return null;
+  }
+}
+
 async function invokeCreatorDataMethod(creator, path, payload, fallbackMessage) {
   const method = path.reduce((value, key) => value?.[key], creator);
 
@@ -513,7 +559,7 @@ async function getCreatorRecordById(config, creator, recordId) {
     creator,
     ["DATA", "getRecordById"],
     {
-      app_name: config.creator.appLinkName,
+      app_name: resolveCreatorAppName(config),
       report_name: config.creator.reports.inbox,
       id: recordId,
     },
@@ -537,7 +583,7 @@ async function getCreatorRecords(config, creator, reportName, criteria) {
     creator,
     ["DATA", "getRecords"],
     {
-      app_name: config.creator.appLinkName,
+      app_name: resolveCreatorAppName(config),
       report_name: reportName,
       criteria,
     },
@@ -545,6 +591,10 @@ async function getCreatorRecords(config, creator, reportName, criteria) {
   );
 
   return toArray(response);
+}
+
+function buildRelatedRecordCriteria(recordId) {
+  return `Approval_Request_ID == "${recordId}" || Approval_Request == "${recordId}"`;
 }
 
 function normalizeApiEnvelope(response) {
@@ -559,8 +609,63 @@ function normalizeApiEnvelope(response) {
   return response;
 }
 
+function resolveCreatorAppName(config) {
+  return (
+    config.creator?.appLinkName ||
+    config.creator?.appName ||
+    config.runtime?.widgetContext?.initData?.appLinkName ||
+    config.runtime?.widgetContext?.initData?.app_name ||
+    ""
+  );
+}
+
+function toInboxItemFromApprovalRecord(record) {
+  return {
+    approvalRecordId: record.approvalRecordId,
+    booksInvoiceId: record.booksInvoiceId,
+    invoiceNumber: record.invoiceNumber,
+    customerName: record.customerName,
+    invoiceTotal: record.invoiceTotal,
+    currencyCode: record.currencyCode,
+    dueDate: record.dueDate,
+    booksStatus: record.booksStatus,
+    paymentStatus: record.paymentStatus,
+    approvalStatus: record.approvalStatus,
+    priority: record.priority,
+    crmAccountName: record.crmAccountName,
+  };
+}
+
+async function updateCreatorRecord(config, creator, reportName, recordId, data) {
+  return invokeCreatorDataMethod(
+    creator,
+    ["DATA", "updateRecordById"],
+    {
+      app_name: resolveCreatorAppName(config),
+      report_name: reportName,
+      id: recordId,
+      payload: { data },
+    },
+    "Creator record update is not available in the current SDK runtime.",
+  );
+}
+
+async function addCreatorRecord(config, creator, formName, data) {
+  return invokeCreatorDataMethod(
+    creator,
+    ["DATA", "addRecords"],
+    {
+      app_name: resolveCreatorAppName(config),
+      form_name: formName,
+      payload: { data },
+    },
+    "Creator record creation is not available in the current SDK runtime.",
+  );
+}
+
 function createCreatorService(config, creator, widgetContext) {
   const customApis = config.creator?.customApis || {};
+  config.runtime = { widgetContext };
 
   return {
     mode: "creator",
@@ -575,23 +680,45 @@ function createCreatorService(config, creator, widgetContext) {
     },
 
     async loadInbox(filters = {}) {
-      const response = await invokeCreatorCustomApi(customApis.loadInbox, {
-        status: filters.approvalStatus || filters.status || "All",
-        search: filters.search || "",
-      });
+      try {
+        const records = await getCreatorRecords(
+          config,
+          creator,
+          config.creator.reports.inbox,
+        );
+        const allItems = records
+          .map(mapApprovalRecord)
+          .filter((record) => record.approvalRecordId)
+          .map(toInboxItemFromApprovalRecord);
+        const items = allItems.filter((item) => matchesFilters(item, filters));
 
-      const normalized = normalizeApiEnvelope(response);
-      const items = normalized?.items || normalized?.data?.items;
+        return {
+          items: deepClone(items),
+          summary: getSummary(allItems),
+        };
+      } catch (recordError) {
+        const response = await invokeCreatorCustomApi(customApis.loadInbox, {
+          status: filters.approvalStatus || filters.status || "All",
+          search: filters.search || "",
+        });
 
-      if (!Array.isArray(items)) {
-        throw new Error(normalized?.message || "Failed to load approval inbox.");
+        const normalized = normalizeApiEnvelope(response);
+        const items = normalized?.items || normalized?.data?.items;
+
+        if (!Array.isArray(items)) {
+          throw new Error(
+            normalized?.message ||
+              recordError?.message ||
+              "Failed to load approval inbox from Creator.",
+          );
+        }
+
+        return {
+          items,
+          summary:
+            normalized?.summary || normalized?.data?.summary || getSummary(items),
+        };
       }
-
-      return {
-        items,
-        summary:
-          normalized?.summary || normalized?.data?.summary || getSummary(items),
-      };
     },
 
     async loadInvoiceDetail(recordId) {
@@ -602,17 +729,21 @@ function createCreatorService(config, creator, widgetContext) {
         throw new Error("Failed to load the approval record from Creator.");
       }
 
-      const booksDetailResponse = await invokeCreatorCustomApi(
+      let booksDetail = mapBooksDetail({}, approvalRecord);
+      const booksDetailResponse = await tryInvokeCreatorCustomApi(
         customApis.loadInvoiceDetail,
         {
           invoiceId: approvalRecord.booksInvoiceId,
           mode: "view",
         },
       );
-      const booksDetail = mapBooksDetail(
-        normalizeApiEnvelope(booksDetailResponse),
-        approvalRecord,
-      );
+
+      if (booksDetailResponse) {
+        booksDetail = mapBooksDetail(
+          normalizeApiEnvelope(booksDetailResponse),
+          approvalRecord,
+        );
+      }
 
       let crmContext = {
         crmAccountName: approvalRecord.crmAccountName,
@@ -624,11 +755,15 @@ function createCreatorService(config, creator, widgetContext) {
       };
 
       if (customApis.loadCrmContext) {
-        try {
-          const crmResponse = await invokeCreatorCustomApi(customApis.loadCrmContext, {
+        const crmResponse = await tryInvokeCreatorCustomApi(
+          customApis.loadCrmContext,
+          {
             customerId: "",
             customerName: booksDetail.customerName,
-          });
+          },
+        );
+
+        if (crmResponse) {
           const crmData = normalizeApiEnvelope(crmResponse);
           crmContext = {
             crmAccountName:
@@ -640,28 +775,32 @@ function createCreatorService(config, creator, widgetContext) {
             riskLevel: approvalRecord.riskLevel || "Unknown",
             lastActivityDate: crmData?.renewalWindow || "",
           };
-        } catch {
-          // CRM enrichment should never block approvals.
         }
       }
 
-      const comments = (
-        await getCreatorRecords(
-          config,
-          creator,
-          config.creator.reports.comments,
-          `Approval_Request_ID == "${approvalRecord.approvalRecordId}"`,
-        )
-      ).map(mapCommentRecord);
+      let comments = [];
+      if (config.creator.reports.comments) {
+        comments = (
+          await getCreatorRecords(
+            config,
+            creator,
+            config.creator.reports.comments,
+            buildRelatedRecordCriteria(approvalRecord.approvalRecordId),
+          )
+        ).map(mapCommentRecord);
+      }
 
-      const audit = (
-        await getCreatorRecords(
-          config,
-          creator,
-          config.creator.reports.audit,
-          `Approval_Request_ID == "${approvalRecord.approvalRecordId}"`,
-        )
-      ).map(mapAuditRecord);
+      let audit = [];
+      if (config.creator.reports.audit) {
+        audit = (
+          await getCreatorRecords(
+            config,
+            creator,
+            config.creator.reports.audit,
+            buildRelatedRecordCriteria(approvalRecord.approvalRecordId),
+          )
+        ).map(mapAuditRecord);
+      }
 
       return {
         approvalRecordId: approvalRecord.approvalRecordId,
@@ -697,7 +836,7 @@ function createCreatorService(config, creator, widgetContext) {
     },
 
     async approveInvoice(recordId, payload) {
-      const response = await invokeCreatorCustomApi(customApis.approveInvoice, {
+      const response = await tryInvokeCreatorCustomApi(customApis.approveInvoice, {
         recordId,
         decision: "Approved",
         comment: payload.comment || "",
@@ -705,10 +844,42 @@ function createCreatorService(config, creator, widgetContext) {
         exceptionReason: payload.exceptionReason || "",
       });
 
-      const normalized = normalizeApiEnvelope(response);
+      if (response) {
+        const normalized = normalizeApiEnvelope(response);
 
-      if (!isSuccessfulResponse(normalized)) {
-        throw new Error(normalized?.message || "Failed to approve invoice.");
+        if (!isSuccessfulResponse(normalized)) {
+          throw new Error(normalized?.message || "Failed to approve invoice.");
+        }
+      } else {
+        await updateCreatorRecord(config, creator, config.creator.reports.inbox, recordId, {
+          Approval_Status: "Approved",
+          Reviewer_Notes: payload.comment || "",
+          Assigned_Reviewer: payload.reviewer || "",
+          Exception_Reason: payload.exceptionReason || "",
+          Approval_Decision_Date: nowIso(),
+        });
+
+        if (payload.comment && config.creator.forms.comments) {
+          await addCreatorRecord(config, creator, config.creator.forms.comments, {
+            Approval_Request_ID: recordId,
+            Author: payload.reviewer || "",
+            Comment_Type: "Approval note",
+            Comment_Body: payload.comment,
+            Created_At: nowIso(),
+          });
+        }
+
+        if (config.creator.forms.audit) {
+          await addCreatorRecord(config, creator, config.creator.forms.audit, {
+            Approval_Request_ID: recordId,
+            Event_Type: "Approved",
+            Previous_Status: "",
+            New_Status: "Approved",
+            Event_Summary: `Invoice approved by ${payload.reviewer || "reviewer"}.`,
+            Actor: payload.reviewer || "Reviewer",
+            Created_At: nowIso(),
+          });
+        }
       }
 
       return this.loadInvoiceDetail(recordId);
@@ -719,7 +890,7 @@ function createCreatorService(config, creator, widgetContext) {
         throw new Error("Rejecting an invoice requires a comment.");
       }
 
-      const response = await invokeCreatorCustomApi(customApis.rejectInvoice, {
+      const response = await tryInvokeCreatorCustomApi(customApis.rejectInvoice, {
         recordId,
         decision: "Rejected",
         comment: payload.comment,
@@ -727,10 +898,43 @@ function createCreatorService(config, creator, widgetContext) {
         exceptionReason: payload.exceptionReason || payload.comment,
       });
 
-      const normalized = normalizeApiEnvelope(response);
+      if (response) {
+        const normalized = normalizeApiEnvelope(response);
 
-      if (!isSuccessfulResponse(normalized)) {
-        throw new Error(normalized?.message || "Failed to reject invoice.");
+        if (!isSuccessfulResponse(normalized)) {
+          throw new Error(normalized?.message || "Failed to reject invoice.");
+        }
+      } else {
+        await updateCreatorRecord(config, creator, config.creator.reports.inbox, recordId, {
+          Approval_Status: "Rejected",
+          Reviewer_Notes: payload.comment,
+          Assigned_Reviewer: payload.reviewer || "",
+          Exception_Reason: payload.exceptionReason || payload.comment,
+          Approval_Decision_Date: nowIso(),
+        });
+
+        if (config.creator.forms.comments) {
+          await addCreatorRecord(config, creator, config.creator.forms.comments, {
+            Approval_Request_ID: recordId,
+            Author: payload.reviewer || "",
+            Comment_Type: "Rejection note",
+            Comment_Body: payload.comment,
+            Created_At: nowIso(),
+          });
+        }
+
+        if (config.creator.forms.audit) {
+          await addCreatorRecord(config, creator, config.creator.forms.audit, {
+            Approval_Request_ID: recordId,
+            Event_Type: "Rejected",
+            Previous_Status: "",
+            New_Status: "Rejected",
+            Event_Summary:
+              payload.exceptionReason || "Invoice rejected with reviewer comment.",
+            Actor: payload.reviewer || "Reviewer",
+            Created_At: nowIso(),
+          });
+        }
       }
 
       return this.loadInvoiceDetail(recordId);
@@ -741,7 +945,7 @@ function createCreatorService(config, creator, widgetContext) {
         throw new Error("Requesting clarification requires a comment.");
       }
 
-      const response = await invokeCreatorCustomApi(
+      const response = await tryInvokeCreatorCustomApi(
         customApis.requestClarification,
         {
           recordId,
@@ -752,12 +956,44 @@ function createCreatorService(config, creator, widgetContext) {
         },
       );
 
-      const normalized = normalizeApiEnvelope(response);
+      if (response) {
+        const normalized = normalizeApiEnvelope(response);
 
-      if (!isSuccessfulResponse(normalized)) {
-        throw new Error(
-          normalized?.message || "Failed to request clarification.",
-        );
+        if (!isSuccessfulResponse(normalized)) {
+          throw new Error(
+            normalized?.message || "Failed to request clarification.",
+          );
+        }
+      } else {
+        await updateCreatorRecord(config, creator, config.creator.reports.inbox, recordId, {
+          Approval_Status: "Needs Clarification",
+          Reviewer_Notes: payload.comment,
+          Assigned_Reviewer: payload.reviewer || "",
+          Exception_Reason: payload.exceptionReason || payload.comment,
+        });
+
+        if (config.creator.forms.comments) {
+          await addCreatorRecord(config, creator, config.creator.forms.comments, {
+            Approval_Request_ID: recordId,
+            Author: payload.reviewer || "",
+            Comment_Type: "Clarification",
+            Comment_Body: payload.comment,
+            Created_At: nowIso(),
+          });
+        }
+
+        if (config.creator.forms.audit) {
+          await addCreatorRecord(config, creator, config.creator.forms.audit, {
+            Approval_Request_ID: recordId,
+            Event_Type: "Clarification Requested",
+            Previous_Status: "",
+            New_Status: "Needs Clarification",
+            Event_Summary:
+              payload.exceptionReason || "Clarification requested by reviewer.",
+            Actor: payload.reviewer || "Reviewer",
+            Created_At: nowIso(),
+          });
+        }
       }
 
       return this.loadInvoiceDetail(recordId);
@@ -768,17 +1004,43 @@ function createCreatorService(config, creator, widgetContext) {
         throw new Error("A comment is required before adding a note.");
       }
 
-      const response = await invokeCreatorCustomApi(customApis.addComment, {
+      const response = await tryInvokeCreatorCustomApi(customApis.addComment, {
         recordId,
         comment: payload.comment,
         reviewer: payload.reviewer || "",
         type: payload.commentType || "Internal Finance Note",
       });
 
-      const normalized = normalizeApiEnvelope(response);
+      if (response) {
+        const normalized = normalizeApiEnvelope(response);
 
-      if (!isSuccessfulResponse(normalized)) {
-        throw new Error(normalized?.message || "Failed to add comment.");
+        if (!isSuccessfulResponse(normalized)) {
+          throw new Error(normalized?.message || "Failed to add comment.");
+        }
+      } else {
+        if (!config.creator.forms.comments) {
+          throw new Error("Comments form is not configured for this widget.");
+        }
+
+        await addCreatorRecord(config, creator, config.creator.forms.comments, {
+          Approval_Request_ID: recordId,
+          Author: payload.reviewer || "",
+          Comment_Type: payload.commentType || "General",
+          Comment_Body: payload.comment,
+          Created_At: nowIso(),
+        });
+
+        if (config.creator.forms.audit) {
+          await addCreatorRecord(config, creator, config.creator.forms.audit, {
+            Approval_Request_ID: recordId,
+            Event_Type: "Comment Added",
+            Previous_Status: "",
+            New_Status: "",
+            Event_Summary: "Reviewer added a new internal comment.",
+            Actor: payload.reviewer || "Reviewer",
+            Created_At: nowIso(),
+          });
+        }
       }
 
       const detail = await this.loadInvoiceDetail(recordId);
@@ -833,9 +1095,13 @@ export async function createInvoiceApprovalService(config) {
   }
 
   if (!runtime) {
-    console.warn(
-      "Zoho Creator SDK was not found. Falling back to mock preview mode.",
-    );
+    if (!config.useMockData) {
+      throw new Error(
+        "Zoho Creator SDK was not found, so real Creator records cannot be loaded. Open this widget inside Zoho Creator, or explicitly enable mock mode with widget param `useMockData=true` or `?mock=true` during local preview.",
+      );
+    }
+
+    console.warn("Zoho Creator SDK was not found. Running in explicit mock mode.");
   }
 
   return createMockService(config);

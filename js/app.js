@@ -148,7 +148,7 @@ function renderKpis() {
 
 function renderToolbarSummary() {
   const chips = [
-    `New ${state.summary.newCount}`,
+    `Pending Review ${state.summary.newCount}`,
     `Under Review ${state.summary.underReviewCount}`,
     `Needs Clarification ${state.summary.clarificationCount}`,
     `Approved ${state.summary.approvedCount}`,

@@ -1,16 +1,17 @@
 export const APP_CONFIG = {
-  useMockData: true,
+  useMockData: false,
   creatorSdkUrl:
     "https://static.zohocdn.com/creator/widgets/version/2.0/widgetsdk-min.js",
   currentReviewerName: "Finance Ops Reviewer",
   filters: {
     approvalStatuses: [
       "All",
-      "New",
+      "Pending Review",
       "Under Review",
       "Needs Clarification",
       "Approved",
       "Rejected",
+      "Cancelled",
     ],
   },
   creator: {
@@ -37,13 +38,24 @@ export const APP_CONFIG = {
   },
 };
 
+function isTrueLike(value) {
+  return value === true || value === "true";
+}
+
+function isFalseLike(value) {
+  return value === false || value === "false";
+}
+
 export function getRuntimeConfig(widgetParams = {}) {
   const useMockDataParam = widgetParams.useMockData;
+  const mockModeQuery =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("mock")
+      : null;
   const resolvedUseMockData =
-    useMockDataParam === true ||
-    useMockDataParam === "true"
+    isTrueLike(mockModeQuery) || isTrueLike(useMockDataParam)
       ? true
-      : useMockDataParam === false || useMockDataParam === "false"
+      : isFalseLike(useMockDataParam)
         ? false
         : APP_CONFIG.useMockData;
 
