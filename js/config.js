@@ -46,7 +46,7 @@ function isFalseLike(value) {
   return value === false || value === "false";
 }
 
-export function getRuntimeConfig(widgetParams = {}) {
+function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
   const useMockDataParam = widgetParams.useMockData;
   const mockModeQuery =
     typeof window !== "undefined"
@@ -60,62 +60,80 @@ export function getRuntimeConfig(widgetParams = {}) {
         : APP_CONFIG.useMockData;
 
   return {
-    ...APP_CONFIG,
+    ...baseConfig,
     useMockData: resolvedUseMockData,
     currentReviewerName:
-      widgetParams.currentReviewerName || APP_CONFIG.currentReviewerName,
+      widgetParams.currentReviewerName || baseConfig.currentReviewerName,
     creator: {
-      ...APP_CONFIG.creator,
+      ...baseConfig.creator,
       appLinkName:
-        widgetParams.creatorAppName || APP_CONFIG.creator.appLinkName || "",
+        widgetParams.creatorAppName ||
+        initData.appLinkName ||
+        initData.app_name ||
+        baseConfig.creator.appLinkName ||
+        "",
       reports: {
-        ...APP_CONFIG.creator.reports,
+        ...baseConfig.creator.reports,
         inbox:
           widgetParams.approvalRequestsReportName ||
-          APP_CONFIG.creator.reports.inbox,
+          baseConfig.creator.reports.inbox,
         comments:
           widgetParams.commentsReportName ||
-          APP_CONFIG.creator.reports.comments,
+          baseConfig.creator.reports.comments,
         audit:
-          widgetParams.auditLogReportName || APP_CONFIG.creator.reports.audit,
+          widgetParams.auditLogReportName || baseConfig.creator.reports.audit,
       },
       forms: {
-        ...APP_CONFIG.creator.forms,
+        ...baseConfig.creator.forms,
         approvalRequests:
           widgetParams.approvalRequestsFormName ||
-          APP_CONFIG.creator.forms.approvalRequests,
+          baseConfig.creator.forms.approvalRequests,
         comments:
-          widgetParams.commentsFormName || APP_CONFIG.creator.forms.comments,
-        audit: widgetParams.auditLogFormName || APP_CONFIG.creator.forms.audit,
+          widgetParams.commentsFormName || baseConfig.creator.forms.comments,
+        audit: widgetParams.auditLogFormName || baseConfig.creator.forms.audit,
       },
       customApis: {
-        ...APP_CONFIG.creator.customApis,
+        ...baseConfig.creator.customApis,
         loadInbox:
           widgetParams.loadInboxFunctionName ||
+          widgetParams.booksListFunctionName ||
           widgetParams.getApprovalInboxFunctionName ||
-          APP_CONFIG.creator.customApis.loadInbox,
+          baseConfig.creator.customApis.loadInbox,
         loadInvoiceDetail:
           widgetParams.loadInvoiceDetailFunctionName ||
+          widgetParams.booksDetailFunctionName ||
           widgetParams.getApprovalDetailFunctionName ||
-          APP_CONFIG.creator.customApis.loadInvoiceDetail,
+          baseConfig.creator.customApis.loadInvoiceDetail,
         loadCrmContext:
           widgetParams.loadCrmContextFunctionName ||
+          widgetParams.crmContextFunctionName ||
           widgetParams.getCrmContextFunctionName ||
-          APP_CONFIG.creator.customApis.loadCrmContext,
+          baseConfig.creator.customApis.loadCrmContext,
         approveInvoice:
           widgetParams.approveInvoiceFunctionName ||
-          APP_CONFIG.creator.customApis.approveInvoice,
+          widgetParams.approvalActionFunctionName ||
+          baseConfig.creator.customApis.approveInvoice,
         rejectInvoice:
           widgetParams.rejectInvoiceFunctionName ||
-          APP_CONFIG.creator.customApis.rejectInvoice,
+          widgetParams.approvalActionFunctionName ||
+          baseConfig.creator.customApis.rejectInvoice,
         requestClarification:
           widgetParams.requestClarificationFunctionName ||
-          APP_CONFIG.creator.customApis.requestClarification,
+          widgetParams.approvalActionFunctionName ||
+          baseConfig.creator.customApis.requestClarification,
         addComment:
           widgetParams.addCommentFunctionName ||
           widgetParams.addApprovalCommentFunctionName ||
-          APP_CONFIG.creator.customApis.addComment,
+          baseConfig.creator.customApis.addComment,
       },
     },
   };
+}
+
+export function getRuntimeConfig(widgetParams = {}) {
+  return buildConfig(APP_CONFIG, widgetParams);
+}
+
+export function hydrateRuntimeConfig(baseConfig, widgetParams = {}, initData = {}) {
+  return buildConfig(baseConfig, widgetParams, initData);
 }

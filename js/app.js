@@ -1,4 +1,4 @@
-import { getRuntimeConfig } from "./config.js";
+import { getRuntimeConfig, hydrateRuntimeConfig } from "./config.js";
 import { createInvoiceApprovalService } from "./invoiceApprovalService.js";
 
 const state = {
@@ -677,6 +677,13 @@ async function bootstrap() {
   state.config = getRuntimeConfig(widgetParams);
   state.service = await createInvoiceApprovalService(state.config);
   state.runtimeInfo = await state.service.init();
+  if (state.runtimeInfo?.widgetContext) {
+    state.config = hydrateRuntimeConfig(
+      state.config,
+      state.runtimeInfo.widgetContext.widgetParams,
+      state.runtimeInfo.widgetContext.initData,
+    );
+  }
   updateRuntimeHeader();
   bindToolbar();
   renderKpis();

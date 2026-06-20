@@ -1,3 +1,4 @@
+import { hydrateRuntimeConfig } from "./config.js";
 import { createMockState } from "./mockData.js";
 
 function deepClone(value) {
@@ -1086,26 +1087,29 @@ async function initializeCreatorRuntime(config) {
 
 export async function createInvoiceApprovalService(config) {
   const runtime = await initializeCreatorRuntime(config);
+  const effectiveConfig = runtime
+    ? hydrateRuntimeConfig(config, runtime.widgetParams, runtime.initData)
+    : config;
 
-  if (runtime && !config.useMockData) {
-    return createCreatorService(config, runtime.creator, runtime);
+  if (runtime && !effectiveConfig.useMockData) {
+    return createCreatorService(effectiveConfig, runtime.creator, runtime);
   }
 
-  if (runtime && config.useMockData) {
-    return createMockService(config);
+  if (runtime && effectiveConfig.useMockData) {
+    return createMockService(effectiveConfig);
   }
 
   if (!runtime) {
-    if (config.useMockData) {
+    if (effectiveConfig.useMockData) {
       console.warn("Zoho Creator SDK was not found. Running in explicit mock mode.");
-      return createMockService(config);
+      return createMockService(effectiveConfig);
     }
 
     console.warn(
       "Zoho Creator SDK was not found. Running in standalone preview mode; live Creator records only load inside the Creator widget runtime.",
     );
-    return createMockService(config);
+    return createMockService(effectiveConfig);
   }
 
-  return createMockService(config);
+  return createMockService(effectiveConfig);
 }
