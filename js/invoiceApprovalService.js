@@ -152,6 +152,7 @@ function createMockService(config) {
         mode: "mock",
         useMockData: true,
         creatorReady: false,
+        standalonePreview: !window.ZOHO?.CREATOR,
       };
     },
     async loadInbox(filters = {}) {
@@ -1095,13 +1096,15 @@ export async function createInvoiceApprovalService(config) {
   }
 
   if (!runtime) {
-    if (!config.useMockData) {
-      throw new Error(
-        "Zoho Creator SDK was not found, so real Creator records cannot be loaded. Open this widget inside Zoho Creator, or explicitly enable mock mode with widget param `useMockData=true` or `?mock=true` during local preview.",
-      );
+    if (config.useMockData) {
+      console.warn("Zoho Creator SDK was not found. Running in explicit mock mode.");
+      return createMockService(config);
     }
 
-    console.warn("Zoho Creator SDK was not found. Running in explicit mock mode.");
+    console.warn(
+      "Zoho Creator SDK was not found. Running in standalone preview mode; live Creator records only load inside the Creator widget runtime.",
+    );
+    return createMockService(config);
   }
 
   return createMockService(config);

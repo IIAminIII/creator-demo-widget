@@ -542,12 +542,19 @@ function wireDetailActions() {
 }
 
 function updateRuntimeHeader() {
+  const standalonePreview = Boolean(state.runtimeInfo?.standalonePreview);
   elements.runtimePill.textContent =
-    state.service?.mode === "creator" ? "Creator Live" : "Preview mode";
+    state.service?.mode === "creator"
+      ? "Creator Live"
+      : standalonePreview
+        ? "Standalone Preview"
+        : "Preview mode";
   elements.headerNote.textContent =
     state.service?.mode === "creator"
       ? "Live Creator environment with configured workflow APIs."
-      : "Local preview data only.";
+      : standalonePreview
+        ? "Public deployment preview. Open the widget inside Zoho Creator to load live records."
+        : "Local preview data only.";
 }
 
 async function loadInbox() {
