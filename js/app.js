@@ -93,6 +93,10 @@ function showToast(message, type = "success") {
   }, 3200);
 }
 
+function getReviewerFallback() {
+  return state.config?.currentReviewerName?.trim() || "Reviewer";
+}
+
 function getErrorMessage(error, fallbackMessage) {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -505,39 +509,44 @@ function wireDetailActions() {
 
   const getPayload = (decision) => ({
     decision,
-    reviewer: reviewerInput.value.trim(),
+    reviewer: reviewerInput.value.trim() || getReviewerFallback(),
     comment: commentInput.value.trim(),
     exceptionReason: exceptionInput.value.trim(),
   });
 
   refreshButton?.addEventListener("click", () => void loadDetail(state.selectedRecordId));
   approveButton?.addEventListener("click", () =>
-    void runAction(() =>
-      state.service.approveInvoice(state.selectedRecordId, getPayload("Approved")),
+    void runAction(
+      () => state.service.approveInvoice(state.selectedRecordId, getPayload("Approved")),
+      "Invoice approved successfully.",
     ),
   );
   rejectButton?.addEventListener("click", () =>
-    void runAction(() =>
-      state.service.rejectInvoice(state.selectedRecordId, getPayload("Rejected")),
+    void runAction(
+      () => state.service.rejectInvoice(state.selectedRecordId, getPayload("Rejected")),
+      "Invoice rejected successfully.",
     ),
   );
   clarifyButton?.addEventListener("click", () =>
-    void runAction(() =>
-      state.service.requestClarification(
-        state.selectedRecordId,
-        getPayload("Needs Clarification"),
-      ),
+    void runAction(
+      () =>
+        state.service.requestClarification(
+          state.selectedRecordId,
+          getPayload("Needs Clarification"),
+        ),
+      "Clarification request sent successfully.",
     ),
   );
   commentButton?.addEventListener("click", () =>
-    void runAction(async () => {
-      await state.service.addComment(state.selectedRecordId, {
-        reviewer: reviewerInput.value.trim(),
-        comment: commentInput.value.trim(),
-        commentType: "Internal Note",
-      });
-      return state.service.loadInvoiceDetail(state.selectedRecordId);
-    }),
+    void runAction(
+      () =>
+        state.service.addComment(state.selectedRecordId, {
+          reviewer: reviewerInput.value.trim(),
+          comment: commentInput.value.trim(),
+          commentType: "Internal Note",
+        }),
+      "Comment added successfully.",
+    ),
   );
 }
 
@@ -550,7 +559,8 @@ function updateRuntimeHeader() {
       : "Local preview data only.";
 }
 
-async function loadInbox() {
+async function loadInbox(options = {}) {
+  const preserveSelectedRecordId = options.preserveSelectedRecordId || "";
   state.loadingInbox = true;
   renderInbox();
 
@@ -559,7 +569,9 @@ async function loadInbox() {
     state.inboxItems = response.items;
     state.summary = response.summary;
 
-    if (!state.selectedRecordId && response.items[0]) {
+    if (preserveSelectedRecordId) {
+      state.selectedRecordId = preserveSelectedRecordId;
+    } else if (!state.selectedRecordId && response.items[0]) {
       state.selectedRecordId = response.items[0].approvalRecordId;
     } else if (
       state.selectedRecordId &&
@@ -597,22 +609,24 @@ async function loadDetail(recordId) {
   }
 }
 
-async function runAction(callback) {
+async function runAction(callback, successMessage = "Workflow action completed successfully.") {
   if (state.busyAction) {
     return;
   }
 
   state.busyAction = true;
+  const activeRecordId = state.selectedRecordId;
 
   try {
     const detail = await callback();
     state.selectedDetail = detail;
-    await loadInbox();
-    if (state.selectedRecordId) {
-      state.selectedDetail = await state.service.loadInvoiceDetail(state.selectedRecordId);
+    await loadInbox({ preserveSelectedRecordId: activeRecordId });
+    state.selectedRecordId = activeRecordId;
+    if (activeRecordId) {
+      state.selectedDetail = await state.service.loadInvoiceDetail(activeRecordId);
     }
     renderDetail();
-    showToast("Workflow action completed successfully.");
+    showToast(successMessage);
   } catch (error) {
     showToast(
       getErrorMessage(error, "The workflow action could not be completed."),

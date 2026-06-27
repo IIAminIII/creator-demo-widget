@@ -97,7 +97,7 @@
     {
       "name": "useMockData",
       "type": "string",
-      "help": "Set to false later when Creator custom APIs are ready. The Day 45 MVP should stay true."
+      "help": "Optional. Set to true only when you intentionally want local mock preview data instead of live Creator data."
     },
     {
       "name": "inboxDefaultStatusFilter",
