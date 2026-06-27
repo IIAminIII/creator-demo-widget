@@ -23,6 +23,8 @@ const state = {
   loadingInbox: false,
   loadingDetail: false,
   busyAction: false,
+  inboxError: null,
+  detailError: null,
   config: null,
 };
 
@@ -95,6 +97,12 @@ function showToast(message, type = "success") {
 
 function getReviewerFallback() {
   return state.config?.currentReviewerName?.trim() || "Reviewer";
+}
+
+function renderRetryButton(buttonId, label) {
+  return `<button type="button" class="secondary-button" id="${buttonId}">${escapeHtml(
+    label,
+  )}</button>`;
 }
 
 function getErrorMessage(error, fallbackMessage) {
@@ -172,19 +180,51 @@ function renderInbox() {
     return;
   }
 
+  if (state.inboxError && !state.inboxItems.length) {
+    elements.inboxList.classList.remove("scrollable");
+    elements.inboxList.innerHTML = `
+      <div class="empty-state">
+        <h3>Inbox refresh failed</h3>
+        <p>${escapeHtml(
+          getErrorMessage(state.inboxError, "Failed to load the invoice inbox."),
+        )}</p>
+        <div class="action-buttons">
+          ${renderRetryButton("retry-inbox-button", "Retry inbox")}
+        </div>
+      </div>
+    `;
+    wireInboxRetryButton();
+    return;
+  }
+
   if (!state.inboxItems.length) {
     elements.inboxList.classList.remove("scrollable");
     elements.inboxList.innerHTML = `
       <div class="empty-state">
         <h3>No invoice records match the current filters</h3>
         <p>Try a different approval status or clear the search box.</p>
-      </div>
-    `;
+    </div>
+  `;
     return;
   }
 
+  const inboxErrorMarkup = state.inboxError
+    ? `
+      <div class="section-hint">
+        ${escapeHtml(
+          getErrorMessage(state.inboxError, "Failed to refresh the invoice inbox."),
+        )}
+        <div class="action-buttons">
+          ${renderRetryButton("retry-inbox-button", "Retry inbox")}
+        </div>
+      </div>
+    `
+    : "";
+
   elements.inboxList.classList.toggle("scrollable", state.inboxItems.length > 6);
-  elements.inboxList.innerHTML = state.inboxItems
+  elements.inboxList.innerHTML = `
+    ${inboxErrorMarkup}
+    ${state.inboxItems
     .map((item) => {
       const activeClass =
         item.approvalRecordId === state.selectedRecordId ? "active" : "";
@@ -208,10 +248,10 @@ function renderInbox() {
             )}</div>
           </div>
           <div class="meta-row">
-            <span>${escapeHtml(item.customerName)}</span>
+            <span>${escapeHtml(item.customerName || "Not available")}</span>
             <span>Due ${escapeHtml(formatShortDate(item.dueDate))}</span>
-            <span>Books ${escapeHtml(item.booksStatus)}</span>
-            <span>Payment ${escapeHtml(item.paymentStatus)}</span>
+            <span>Books ${escapeHtml(item.booksStatus || "Unknown")}</span>
+            <span>Payment ${escapeHtml(item.paymentStatus || "Unknown")}</span>
           </div>
           <div class="meta-row">
             <span>Account ${escapeHtml(item.crmAccountName || "Not linked yet")}</span>
@@ -220,7 +260,8 @@ function renderInbox() {
         </button>
       `;
     })
-    .join("");
+    .join("")}
+  `;
 
   elements.inboxList
     .querySelectorAll("[data-record-id]")
@@ -234,12 +275,30 @@ function renderInbox() {
         }
       }),
     );
+
+  wireInboxRetryButton();
 }
 
 function renderDetail() {
   if (state.loadingDetail) {
     elements.detailRoot.innerHTML =
       '<div class="loading-state">Loading invoice detail...</div>';
+    return;
+  }
+
+  if (state.detailError && !state.selectedDetail) {
+    elements.detailRoot.innerHTML = `
+      <div class="empty-state">
+        <h3>Detail refresh failed</h3>
+        <p>${escapeHtml(
+          getErrorMessage(state.detailError, "Failed to load invoice detail."),
+        )}</p>
+        <div class="action-buttons">
+          ${renderRetryButton("retry-detail-button", "Retry detail")}
+        </div>
+      </div>
+    `;
+    wireDetailRetryButton();
     return;
   }
 
@@ -257,6 +316,18 @@ function renderDetail() {
   const invoice = detail.invoice;
   const approval = detail.approval;
   const crm = detail.crmContext;
+  const detailErrorMarkup = state.detailError
+    ? `
+      <div class="section-hint">
+        ${escapeHtml(
+          getErrorMessage(state.detailError, "Failed to refresh invoice detail."),
+        )}
+        <div class="action-buttons">
+          ${renderRetryButton("retry-detail-button", "Retry detail")}
+        </div>
+      </div>
+    `
+    : "";
 
   const lineRows = detail.lineItems.length
     ? detail.lineItems
@@ -330,8 +401,8 @@ function renderDetail() {
         <div>
           <div class="badge-row">
             ${renderBadge(approval.approvalStatus, statusClass(approval.approvalStatus))}
-            ${renderBadge(invoice.booksStatus, "source-books")}
-            ${renderBadge(invoice.paymentStatus, "source-books")}
+            ${renderBadge(invoice.booksStatus || "Unknown", "source-books")}
+            ${renderBadge(invoice.paymentStatus || "Unknown", "source-books")}
             ${renderBadge("Creator Workflow", "source-creator")}
           </div>
           <h2>${escapeHtml(invoice.invoiceNumber)}</h2>
@@ -351,6 +422,8 @@ function renderDetail() {
       </div>
     </section>
 
+    ${detailErrorMarkup}
+
     <section class="detail-grid">
       <article class="detail-card">
         <div class="section-tag tag-books">Books Snapshot</div>
@@ -358,7 +431,7 @@ function renderDetail() {
         <div class="triple-grid">
           <div class="mini-card">
             <div class="mini-label">Customer</div>
-            <div class="mini-value">${escapeHtml(invoice.customerName)}</div>
+            <div class="mini-value">${escapeHtml(invoice.customerName || "Not available")}</div>
           </div>
           <div class="mini-card">
             <div class="mini-label">Invoice total</div>
@@ -492,9 +565,10 @@ function renderDetail() {
         <div class="audit-list">${auditMarkup}</div>
       </article>
     </section>
-  `;
+    `;
 
   wireDetailActions();
+  wireDetailRetryButton();
 }
 
 function wireDetailActions() {
@@ -566,9 +640,24 @@ function updateRuntimeHeader() {
       : "Local preview data only.";
 }
 
+function wireInboxRetryButton() {
+  const retryButton = document.getElementById("retry-inbox-button");
+  retryButton?.addEventListener("click", async () => {
+    state.inboxError = null;
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
+    await loadDetail(state.selectedRecordId);
+  });
+}
+
+function wireDetailRetryButton() {
+  const retryButton = document.getElementById("retry-detail-button");
+  retryButton?.addEventListener("click", () => void loadDetail(state.selectedRecordId));
+}
+
 async function loadInbox(options = {}) {
   const preserveSelectedRecordId = options.preserveSelectedRecordId || "";
   state.loadingInbox = true;
+  state.inboxError = null;
   renderInbox();
 
   try {
@@ -587,6 +676,7 @@ async function loadInbox(options = {}) {
       state.selectedRecordId = response.items[0]?.approvalRecordId || "";
     }
   } catch (error) {
+    state.inboxError = error;
     showToast(getErrorMessage(error, "Failed to load the invoice inbox."), "error");
   } finally {
     state.loadingInbox = false;
@@ -599,16 +689,19 @@ async function loadInbox(options = {}) {
 async function loadDetail(recordId) {
   if (!recordId) {
     state.selectedDetail = null;
+    state.detailError = null;
     renderDetail();
     return;
   }
 
   state.loadingDetail = true;
+  state.detailError = null;
   renderDetail();
 
   try {
     state.selectedDetail = await state.service.loadInvoiceDetail(recordId);
   } catch (error) {
+    state.detailError = error;
     showToast(getErrorMessage(error, "Failed to load invoice detail."), "error");
   } finally {
     state.loadingDetail = false;

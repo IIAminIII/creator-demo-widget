@@ -1,3 +1,11 @@
+function getEnvValue(key, fallback = "") {
+  if (typeof import.meta !== "undefined" && import.meta.env && key in import.meta.env) {
+    return import.meta.env[key] || fallback;
+  }
+
+  return fallback;
+}
+
 export const APP_CONFIG = {
   useMockData: false,
   creatorSdkUrl:
@@ -14,7 +22,7 @@ export const APP_CONFIG = {
     ],
   },
   creator: {
-    appLinkName: "demo14instawebworkscom",
+    appLinkName: getEnvValue("VITE_CREATOR_APP_LINK_NAME", "demo14instawebworkscom"),
     reports: {
       inbox: "Pending_Invoice_Approvals",
       comments: "Invoice_Approval_Comments_Report",
@@ -26,19 +34,13 @@ export const APP_CONFIG = {
       audit: "Invoice_Approval_Audit_Log",
     },
     customApis: {
-      loadInbox:
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getApprovalInbox?publickey=Cxn5b9KfnYWAMnbkCWqvzybd7",
-      loadInvoiceDetail:
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getApprovalDetail?publickey=yuxJrwRUQgNTtrZPk19KAe5YN",
-      loadCrmContext: "",
-      approveInvoice:
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/approveInvoice?publickey=e8C65Z0y02m57z4nmrRGE8dnB",
-      rejectInvoice:
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/rejectInvoice?publickey=Qk8gVJSbp8uPqdVQ9DFF0U78R",
-      requestClarification:
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/requestClarification?publickey=1V3FmYUKv1vn3W43AmTkHyeXh",
-      addComment:
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/addApprovalComment?publickey=ZdQeACMaQvSjZyRMXJCUJn7EO",
+      loadInbox: getEnvValue("VITE_CREATOR_GET_APPROVAL_INBOX_URL"),
+      loadInvoiceDetail: getEnvValue("VITE_CREATOR_GET_APPROVAL_DETAIL_URL"),
+      loadCrmContext: getEnvValue("VITE_CREATOR_LOAD_CRM_CONTEXT_URL"),
+      approveInvoice: getEnvValue("VITE_CREATOR_APPROVE_INVOICE_URL"),
+      rejectInvoice: getEnvValue("VITE_CREATOR_REJECT_INVOICE_URL"),
+      requestClarification: getEnvValue("VITE_CREATOR_REQUEST_CLARIFICATION_URL"),
+      addComment: getEnvValue("VITE_CREATOR_ADD_APPROVAL_COMMENT_URL"),
     },
   },
 };

@@ -436,7 +436,7 @@ function mapApprovalRecord(record) {
       getNestedValue(
         record,
         ["Customer_Name", "Books_Customer_Name", "customerName"],
-        "",
+        "Not available",
       ),
     ),
     invoiceTotal: toNumber(getNestedValue(record, ["Invoice_Total"], 0)),
