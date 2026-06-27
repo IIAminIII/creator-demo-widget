@@ -657,12 +657,15 @@ function isCustomApiUrl(apiReference) {
 }
 
 async function invokePublicCustomApi(apiReference, payload = {}) {
-  const response = await fetch(apiReference, {
+  const response = await fetch("/api/creator-proxy", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      apiReference,
+      payload,
+    }),
   });
 
   const rawText = await response.text();
