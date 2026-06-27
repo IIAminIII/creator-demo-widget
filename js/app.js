@@ -588,7 +588,28 @@ function wireDetailActions() {
     exceptionReason: exceptionInput.value.trim(),
   });
 
-  refreshButton?.addEventListener("click", () => void loadDetail(state.selectedRecordId));
+  refreshButton?.addEventListener("click", async () => {
+    if (!state.selectedRecordId) {
+      return;
+    }
+
+    state.loadingDetail = true;
+    renderDetail();
+
+    try {
+      state.selectedDetail = await state.service.refreshBooksInvoiceSnapshot(
+        state.selectedRecordId,
+      );
+      state.detailError = null;
+      showToast("Books snapshot refreshed.");
+    } catch (error) {
+      state.detailError = error;
+      showToast(getErrorMessage(error, "Failed to refresh Books snapshot."), "error");
+    } finally {
+      state.loadingDetail = false;
+      renderDetail();
+    }
+  });
   approveButton?.addEventListener("click", () =>
     void runAction(
       () => state.service.approveInvoice(state.selectedRecordId, getPayload("Approved")),

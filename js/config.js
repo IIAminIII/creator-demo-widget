@@ -37,6 +37,9 @@ export const APP_CONFIG = {
       loadInbox: getEnvValue("VITE_CREATOR_GET_APPROVAL_INBOX_URL"),
       loadInvoiceDetail: getEnvValue("VITE_CREATOR_GET_APPROVAL_DETAIL_URL"),
       loadCrmContext: getEnvValue("VITE_CREATOR_LOAD_CRM_CONTEXT_URL"),
+      refreshBooksInvoiceSnapshot: getEnvValue(
+        "VITE_CREATOR_REFRESH_BOOKS_INVOICE_SNAPSHOT_URL",
+      ),
       approveInvoice: getEnvValue("VITE_CREATOR_APPROVE_INVOICE_URL"),
       rejectInvoice: getEnvValue("VITE_CREATOR_REJECT_INVOICE_URL"),
       requestClarification: getEnvValue("VITE_CREATOR_REQUEST_CLARIFICATION_URL"),
@@ -113,6 +116,10 @@ function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
           widgetParams.loadCrmContextFunctionName ||
           widgetParams.getCrmContextFunctionName ||
           baseConfig.creator.customApis.loadCrmContext,
+        refreshBooksInvoiceSnapshot:
+          widgetParams.refreshBooksInvoiceSnapshotFunctionName ||
+          widgetParams.refreshBooksSnapshotFunctionName ||
+          baseConfig.creator.customApis.refreshBooksInvoiceSnapshot,
         approveInvoice:
           widgetParams.approveInvoiceFunctionName ||
           baseConfig.creator.customApis.approveInvoice,

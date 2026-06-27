@@ -13,6 +13,7 @@
 - Connected the widget to these Creator APIs:
   - `getApprovalInbox`
   - `getApprovalDetail`
+  - `refreshBooksInvoiceSnapshot`
   - `approveInvoice`
   - `rejectInvoice`
   - `requestClarification`
@@ -48,6 +49,7 @@
 - Standalone Vercel mode now uses a proxy to reach public Creator APIs.
 - The remaining empty fields are likely coming from the backend data itself, not the UI.
 - API URLs can now be supplied via `.env` or Vercel environment variables.
+- Books snapshot refresh can now use its own dedicated Creator custom API URL.
 
 ## Next Steps
 

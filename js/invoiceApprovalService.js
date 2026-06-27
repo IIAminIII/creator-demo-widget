@@ -1117,6 +1117,32 @@ function createCreatorService(config, creator, widgetContext) {
       };
     },
 
+    async refreshBooksInvoiceSnapshot(recordId) {
+      if (customApis.refreshBooksInvoiceSnapshot) {
+        try {
+          const response = await invokeCreatorCustomApi(
+            customApis.refreshBooksInvoiceSnapshot,
+            {
+              approvalRecordId: recordId,
+              recordId,
+              mode: "refresh",
+            },
+          );
+          const normalized = normalizeApiEnvelope(response);
+          const detail =
+            normalized?.detail || normalized?.data?.detail || normalized?.data || normalized;
+
+          if (detail && !hasExplicitFailure(detail)) {
+            return mapApiInvoiceDetail(detail);
+          }
+        } catch (error) {
+          console.warn("Falling back to Creator Books snapshot refresh:", error);
+        }
+      }
+
+      return this.loadInvoiceDetail(recordId);
+    },
+
     async approveInvoice(recordId, payload) {
       const reviewer = normalizeReviewerName(payload?.reviewer);
 
@@ -1315,7 +1341,8 @@ function canUseStandaloneCreatorApis(config) {
 
   return (
     isCustomApiUrl(customApis.loadInbox) &&
-    isCustomApiUrl(customApis.loadInvoiceDetail)
+    (isCustomApiUrl(customApis.loadInvoiceDetail) ||
+      isCustomApiUrl(customApis.refreshBooksInvoiceSnapshot))
   );
 }
 
