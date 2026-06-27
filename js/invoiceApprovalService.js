@@ -350,6 +350,11 @@ function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function toOptionalNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function isSuccessfulResponse(response) {
   return (
     response?.ok === true ||
@@ -370,6 +375,48 @@ function hasExplicitFailure(response) {
     response?.status === "failed" ||
     response?.error === true
   );
+}
+
+function normalizeSummary(rawSummary, items = []) {
+  const computed = getSummary(items);
+
+  if (!rawSummary || typeof rawSummary !== "object") {
+    return computed;
+  }
+
+  const newCount =
+    toOptionalNumber(rawSummary.newCount) ??
+    toOptionalNumber(rawSummary.pendingReviewCount) ??
+    toOptionalNumber(rawSummary.pending_review) ??
+    computed.newCount;
+  const underReviewCount =
+    toOptionalNumber(rawSummary.underReviewCount) ??
+    toOptionalNumber(rawSummary.underReview) ??
+    toOptionalNumber(rawSummary.under_review) ??
+    computed.underReviewCount;
+  const clarificationCount =
+    toOptionalNumber(rawSummary.clarificationCount) ??
+    toOptionalNumber(rawSummary.clarification) ??
+    computed.clarificationCount;
+  const approvedCount =
+    toOptionalNumber(rawSummary.approvedCount) ??
+    toOptionalNumber(rawSummary.approved) ??
+    computed.approvedCount;
+  const rejectedCount =
+    toOptionalNumber(rawSummary.rejectedCount) ??
+    toOptionalNumber(rawSummary.rejected) ??
+    computed.rejectedCount;
+
+  return {
+    total: toOptionalNumber(rawSummary.total) ?? computed.total,
+    newCount,
+    underReviewCount,
+    clarificationCount,
+    approvedCount,
+    rejectedCount,
+    highPriorityCount:
+      toOptionalNumber(rawSummary.highPriorityCount) ?? computed.highPriorityCount,
+  };
 }
 
 function mapApprovalRecord(record) {
@@ -397,26 +444,32 @@ function mapApprovalRecord(record) {
     dueDate: String(getNestedValue(record, ["Due_Date"], "")),
     invoiceDate: String(getNestedValue(record, ["Invoice_Date"], "")),
     booksStatus: String(
-      getNestedValue(record, ["Books_Invoice_Status"], "Unknown"),
+      getNestedValue(record, ["Books_Invoice_Status", "booksStatus"], "Unknown"),
     ),
     paymentStatus: String(
-      getNestedValue(record, ["Books_Payment_Status"], "Unknown"),
+      getNestedValue(record, ["Books_Payment_Status", "paymentStatus"], "Unknown"),
     ),
     approvalStatus: normalizeApprovalStatus(
-      getNestedValue(record, ["Approval_Status"], "Pending Review"),
+      getNestedValue(record, ["Approval_Status", "approvalStatus", "status"], "Pending Review"),
     ),
-    priority: String(getNestedValue(record, ["Priority"], "Medium")),
+    priority: String(getNestedValue(record, ["Priority", "priority"], "Medium")),
     assignedReviewer: String(
-      getNestedValue(record, ["Assigned_Reviewer"], "Unassigned"),
+      getNestedValue(record, ["Assigned_Reviewer", "assignedReviewer"], "Unassigned"),
     ),
-    exceptionReason: String(getNestedValue(record, ["Exception_Reason"], "")),
-    reviewerNotes: String(getNestedValue(record, ["Reviewer_Notes"], "")),
+    exceptionReason: String(
+      getNestedValue(record, ["Exception_Reason", "exceptionReason"], ""),
+    ),
+    reviewerNotes: String(
+      getNestedValue(record, ["Reviewer_Notes", "reviewerNotes"], ""),
+    ),
     approvalDecisionDate: String(
-      getNestedValue(record, ["Approval_Decision_Date"], ""),
+      getNestedValue(record, ["Approval_Decision_Date", "decisionDate"], ""),
     ),
-    lastBooksSyncAt: String(getNestedValue(record, ["Last_Books_Sync_At"], "")),
+    lastBooksSyncAt: String(
+      getNestedValue(record, ["Last_Books_Sync_At", "lastBooksSyncAt"], ""),
+    ),
     lastCrmEnrichmentAt: String(
-      getNestedValue(record, ["Last_CRM_Enrichment_At"], ""),
+      getNestedValue(record, ["Last_CRM_Enrichment_At", "lastCrmEnrichmentAt"], ""),
     ),
     crmAccountName: String(getNestedValue(record, ["CRM_Account_Name"], "")),
     crmDealName: String(getNestedValue(record, ["CRM_Deal_Name"], "")),
@@ -429,7 +482,17 @@ function mapApprovalRecord(record) {
     ),
     dealStage: String(getNestedValue(record, ["CRM_Deal_Stage"], "")),
     riskLevel: String(getNestedValue(record, ["CRM_Risk_Level"], "")),
-    syncStatus: String(getNestedValue(record, ["Sync_Status"], "Unknown")),
+    syncStatus: String(getNestedValue(record, ["Sync_Status", "syncStatus"], "Unknown")),
+  };
+}
+
+function mapLineItemRecord(record) {
+  return {
+    id: String(getNestedValue(record, ["id", "ID"], `LINE-${Date.now()}`)),
+    description: String(getNestedValue(record, ["description", "name"], "")),
+    quantity: toNumber(getNestedValue(record, ["quantity"], 0)),
+    rate: toNumber(getNestedValue(record, ["rate"], 0)),
+    total: toNumber(getNestedValue(record, ["total"], 0)),
   };
 }
 
@@ -516,7 +579,9 @@ function mapApiInvoiceDetail(detail) {
         ),
       ),
     },
-    lineItems: Array.isArray(detail?.lineItems) ? deepClone(detail.lineItems) : [],
+    lineItems: Array.isArray(detail?.lineItems)
+      ? detail.lineItems.map(mapLineItemRecord)
+      : [],
     crmContext: {
       crmAccountName: String(
         getNestedValue(
@@ -905,10 +970,10 @@ function createCreatorService(config, creator, widgetContext) {
           if (Array.isArray(items)) {
             return {
               items: deepClone(items),
-              summary:
-                normalized?.summary ||
-                normalized?.data?.summary ||
-                getSummary(items),
+              summary: normalizeSummary(
+                normalized?.summary || normalized?.data?.summary,
+                items,
+              ),
             };
           }
         } catch (error) {
@@ -951,8 +1016,10 @@ function createCreatorService(config, creator, widgetContext) {
 
         return {
           items,
-          summary:
-            normalized?.summary || normalized?.data?.summary || getSummary(items),
+          summary: normalizeSummary(
+            normalized?.summary || normalized?.data?.summary,
+            items,
+          ),
         };
       }
     },
