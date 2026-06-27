@@ -26,8 +26,10 @@ export const APP_CONFIG = {
       audit: "Invoice_Approval_Audit_Log",
     },
     customApis: {
-      loadInbox: "getApprovalInbox",
-      loadInvoiceDetail: "getApprovalDetail",
+      loadInbox:
+        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getApprovalInbox?publickey=Cxn5b9KfnYWAMnbkCWqvzybd7",
+      loadInvoiceDetail:
+        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getApprovalDetail?publickey=yuxJrwRUQgNTtrZPk19KAe5YN",
       loadCrmContext: "",
       approveInvoice:
         "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/approveInvoice?publickey=e8C65Z0y02m57z4nmrRGE8dnB",

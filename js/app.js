@@ -551,6 +551,13 @@ function wireDetailActions() {
 }
 
 function updateRuntimeHeader() {
+  if (state.runtimeInfo?.publicCustomApiMode) {
+    elements.runtimePill.textContent = "Public API Live";
+    elements.headerNote.textContent =
+      "Live Creator data loaded through public custom API URLs in standalone mode.";
+    return;
+  }
+
   elements.runtimePill.textContent =
     state.service?.mode === "creator" ? "Creator Live" : "Preview mode";
   elements.headerNote.textContent =

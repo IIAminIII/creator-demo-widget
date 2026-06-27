@@ -652,6 +652,41 @@ function parseCustomApiReference(apiReference) {
   }
 }
 
+function isCustomApiUrl(apiReference) {
+  return /^https?:\/\//i.test(normalizeText(apiReference));
+}
+
+async function invokePublicCustomApi(apiReference, payload = {}) {
+  const response = await fetch(apiReference, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const rawText = await response.text();
+  let parsed = rawText;
+
+  if (rawText) {
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      parsed = rawText;
+    }
+  }
+
+  if (!response.ok) {
+    const normalized = unwrapCreatorApiResponse(parsed);
+    throw new Error(
+      normalized?.message ||
+        `Creator public custom API request failed with status ${response.status}.`,
+    );
+  }
+
+  return unwrapCreatorApiResponse(parsed);
+}
+
 async function invokeCreatorCustomApi(apiReference, payload = {}) {
   const { apiName } = parseCustomApiReference(apiReference);
 
@@ -659,20 +694,24 @@ async function invokeCreatorCustomApi(apiReference, payload = {}) {
     throw new Error("Creator Custom API name is missing in widget config.");
   }
 
-  if (!window.ZOHO?.CREATOR?.API?.invokeCustomApi) {
-    throw new Error(
-      "ZOHO.CREATOR.API.invokeCustomApi is not available. Test the widget inside Zoho Creator, not only local browser.",
-    );
+  if (window.ZOHO?.CREATOR?.API?.invokeCustomApi) {
+    const response = await window.ZOHO.CREATOR.API.invokeCustomApi({
+      api_name: apiName,
+      http_method: "POST",
+      content_type: "application/json",
+      payload,
+    });
+
+    return unwrapCreatorApiResponse(response);
   }
 
-  const response = await window.ZOHO.CREATOR.API.invokeCustomApi({
-    api_name: apiName,
-    http_method: "POST",
-    content_type: "application/json",
-    payload,
-  });
+  if (isCustomApiUrl(apiReference)) {
+    return invokePublicCustomApi(apiReference, payload);
+  }
 
-  return unwrapCreatorApiResponse(response);
+  throw new Error(
+    "ZOHO.CREATOR.API.invokeCustomApi is not available, and no public custom API URL was configured for standalone mode.",
+  );
 }
 
 async function invokeCreatorDataMethod(creator, path, payload, fallbackMessage) {
@@ -843,7 +882,9 @@ function createCreatorService(config, creator, widgetContext) {
       return {
         mode: "creator",
         useMockData: false,
-        creatorReady: true,
+        creatorReady: Boolean(creator),
+        standalonePreview: !creator,
+        publicCustomApiMode: !creator,
         widgetContext,
       };
     },
@@ -1199,6 +1240,15 @@ function createCreatorService(config, creator, widgetContext) {
   };
 }
 
+function canUseStandaloneCreatorApis(config) {
+  const customApis = config.creator?.customApis || {};
+
+  return (
+    isCustomApiUrl(customApis.loadInbox) &&
+    isCustomApiUrl(customApis.loadInvoiceDetail)
+  );
+}
+
 async function initializeCreatorRuntime(config) {
   const creator = window.ZOHO?.CREATOR;
 
@@ -1251,6 +1301,13 @@ export async function createInvoiceApprovalService(config) {
     if (effectiveConfig.useMockData) {
       console.warn("Zoho Creator SDK was not found. Running in explicit mock mode.");
       return createMockService(effectiveConfig);
+    }
+
+    if (canUseStandaloneCreatorApis(effectiveConfig)) {
+      console.warn(
+        "Zoho Creator SDK was not found. Running in standalone live mode through public Creator custom APIs.",
+      );
+      return createCreatorService(effectiveConfig, null, null);
     }
 
     console.warn(
