@@ -416,7 +416,7 @@ function renderDetail() {
         </div>
         <div class="hero-actions">
           <button type="button" class="secondary-button" id="refresh-detail-button">
-            Refresh detail
+            Refresh from Books
           </button>
         </div>
       </div>
