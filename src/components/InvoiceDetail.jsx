@@ -22,6 +22,18 @@ function formatDateTime(value) {
   return parsed.toLocaleString();
 }
 
+function formatLineItemTax(line) {
+  if (!line?.taxName && !line?.taxPercentage) {
+    return "N/A";
+  }
+
+  if (line.taxName && line.taxPercentage) {
+    return `${line.taxName} (${line.taxPercentage}%)`;
+  }
+
+  return line.taxName || `${line.taxPercentage}%`;
+}
+
 function normalizeDifferenceFound(value, summary = "") {
   if (typeof value === "boolean") {
     return value;
@@ -259,14 +271,20 @@ export default function InvoiceDetail({
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
-              <h4 className="text-lg font-semibold text-slate-900">Books invoice snapshot</h4>
-              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-                <table className="w-full text-sm">
+              <h4 className="text-lg font-semibold text-slate-900">Invoice Line Items</h4>
+              <p className="mt-2 text-sm text-slate-500">
+                Items and charges pulled from the linked Zoho Books invoice.
+              </p>
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="min-w-[920px] w-full text-sm">
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
+                      <th className="px-4 py-3 text-left font-medium">Item</th>
                       <th className="px-4 py-3 text-left font-medium">Description</th>
                       <th className="px-4 py-3 text-left font-medium">Qty</th>
                       <th className="px-4 py-3 text-left font-medium">Rate</th>
+                      <th className="px-4 py-3 text-left font-medium">Discount</th>
+                      <th className="px-4 py-3 text-left font-medium">Tax</th>
                       <th className="px-4 py-3 text-left font-medium">Total</th>
                     </tr>
                   </thead>
@@ -274,11 +292,18 @@ export default function InvoiceDetail({
                     {detail.lineItems?.length ? (
                       detail.lineItems.map((line) => (
                         <tr key={line.id} className="border-t border-slate-200 text-slate-700">
+                          <td className="px-4 py-3 font-medium text-slate-900">
+                            {line.name || "Item"}
+                          </td>
                           <td className="px-4 py-3">{line.description}</td>
                           <td className="px-4 py-3">{line.quantity}</td>
                           <td className="px-4 py-3">
                             {formatCurrency(line.rate, detail.currencyCode)}
                           </td>
+                          <td className="px-4 py-3">
+                            {formatCurrency(line.discount, detail.currencyCode)}
+                          </td>
+                          <td className="px-4 py-3">{formatLineItemTax(line)}</td>
                           <td className="px-4 py-3">
                             {formatCurrency(line.total, detail.currencyCode)}
                           </td>
@@ -286,8 +311,8 @@ export default function InvoiceDetail({
                       ))
                     ) : (
                       <tr className="border-t border-slate-200">
-                        <td colSpan="4" className="px-4 py-4 text-slate-500">
-                          No line-item snapshot is available yet. Wire the Books detail function to enrich this section.
+                        <td colSpan="7" className="px-4 py-4 text-slate-500">
+                          No line items found for this invoice.
                         </td>
                       </tr>
                     )}

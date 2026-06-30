@@ -107,9 +107,13 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  async function loadInbox(nextFilters = filters) {
-    setInboxLoading(true);
-    setErrorMessage("");
+  async function loadInbox(nextFilters = filters, options = {}) {
+    const silent = options.silent === true;
+
+    if (!silent) {
+      setInboxLoading(true);
+      setErrorMessage("");
+    }
 
     try {
       const response = await service.loadInbox(nextFilters);
@@ -125,28 +129,40 @@ export default function App() {
         setSelectedRecordId(response.items[0]?.approvalRecordId ?? "");
       }
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, "Failed to load the invoice inbox."));
+      if (!silent) {
+        setErrorMessage(getErrorMessage(error, "Failed to load the invoice inbox."));
+      }
     } finally {
-      setInboxLoading(false);
+      if (!silent) {
+        setInboxLoading(false);
+      }
     }
   }
 
-  async function loadDetail(recordId) {
+  async function loadDetail(recordId, options = {}) {
     if (!recordId) {
       setSelectedDetail(null);
       return;
     }
 
-    setDetailLoading(true);
-    setErrorMessage("");
+    const silent = options.silent === true;
+
+    if (!silent) {
+      setDetailLoading(true);
+      setErrorMessage("");
+    }
 
     try {
       const detail = await service.loadInvoiceDetail(recordId);
       setSelectedDetail(detail);
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, "Failed to load the invoice detail."));
+      if (!silent) {
+        setErrorMessage(getErrorMessage(error, "Failed to load the invoice detail."));
+      }
     } finally {
-      setDetailLoading(false);
+      if (!silent) {
+        setDetailLoading(false);
+      }
     }
   }
 
@@ -162,6 +178,37 @@ export default function App() {
       loadDetail(selectedRecordId);
     }
   }, [selectedRecordId]);
+
+  useEffect(() => {
+    const intervalMs = Number(config.autoRefreshIntervalMs || 0);
+
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      if (actionLoading || inboxLoading || detailLoading) {
+        return;
+      }
+
+      void loadInbox(filters, { silent: true }).then(() => {
+        if (selectedRecordId) {
+          return loadDetail(selectedRecordId, { silent: true });
+        }
+
+        return undefined;
+      });
+    }, intervalMs);
+
+    return () => window.clearInterval(timer);
+  }, [
+    actionLoading,
+    config.autoRefreshIntervalMs,
+    detailLoading,
+    filters,
+    inboxLoading,
+    selectedRecordId,
+  ]);
 
   async function runAction(action) {
     setActionLoading(true);

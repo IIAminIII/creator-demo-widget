@@ -500,11 +500,28 @@ function mapApprovalRecord(record) {
 function mapLineItemRecord(record) {
   return {
     id: String(getNestedValue(record, ["id", "ID"], `LINE-${Date.now()}`)),
-    description: String(getNestedValue(record, ["description", "name"], "")),
+    name: String(getNestedValue(record, ["name", "itemName"], "")),
+    description: String(getNestedValue(record, ["description"], "")),
     quantity: toNumber(getNestedValue(record, ["quantity"], 0)),
     rate: toNumber(getNestedValue(record, ["rate"], 0)),
-    total: toNumber(getNestedValue(record, ["total"], 0)),
+    discount: toNumber(getNestedValue(record, ["discount", "discountAmount"], 0)),
+    taxName: String(getNestedValue(record, ["taxName", "tax_name"], "")),
+    taxPercentage: toNumber(
+      getNestedValue(record, ["taxPercentage", "tax_percentage"], 0),
+    ),
+    total: toNumber(getNestedValue(record, ["itemTotal", "total"], 0)),
   };
+}
+
+function extractLineItems(detail) {
+  const candidates = [
+    detail?.invoice?.lineItems,
+    detail?.lineItems,
+    detail?.booksLineItems,
+  ];
+
+  const source = candidates.find(Array.isArray);
+  return Array.isArray(source) ? source.map(mapLineItemRecord) : [];
 }
 
 function mapCommentRecord(record) {
@@ -590,9 +607,7 @@ function mapApiInvoiceDetail(detail) {
         ),
       ),
     },
-    lineItems: Array.isArray(detail?.lineItems)
-      ? detail.lineItems.map(mapLineItemRecord)
-      : [],
+    lineItems: extractLineItems(detail),
     crmContext: {
       crmAccountName: String(
         getNestedValue(
@@ -689,7 +704,7 @@ function mapBooksDetail(detail, fallbackRecord) {
     paymentStatus: String(
       getNestedValue(detail, ["paymentStatus"], fallbackRecord.paymentStatus),
     ),
-    lineItems: Array.isArray(detail?.lineItems) ? detail.lineItems : [],
+    lineItems: extractLineItems(detail),
     lastBooksSyncAt: String(
       getNestedValue(detail, ["lastBooksSyncAt"], fallbackRecord.lastBooksSyncAt),
     ),

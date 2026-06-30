@@ -29,6 +29,30 @@ function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeLineItem(record = {}) {
+  return {
+    id: String(record.id ?? record.ID ?? `LINE-${Date.now()}`),
+    name: getFirstString(record.name, record.itemName),
+    description: getFirstString(record.description),
+    quantity: toNumber(record.quantity),
+    rate: toNumber(record.rate),
+    discount: toNumber(record.discount ?? record.discountAmount),
+    taxName: getFirstString(record.taxName, record.tax_name),
+    taxPercentage: toNumber(record.taxPercentage ?? record.tax_percentage),
+    total: toNumber(record.itemTotal ?? record.total),
+  };
+}
+
+function extractLineItems(detail = {}) {
+  const source =
+    (Array.isArray(detail?.invoice?.lineItems) && detail.invoice.lineItems) ||
+    (Array.isArray(detail?.lineItems) && detail.lineItems) ||
+    (Array.isArray(detail?.booksLineItems) && detail.booksLineItems) ||
+    [];
+
+  return source.map(normalizeLineItem);
+}
+
 function matchesFilter(item, filters) {
   const statusMatches =
     !filters.status || filters.status === "All" || item.approvalStatus === filters.status;
@@ -367,7 +391,7 @@ function createCreatorService(api, config) {
         differenceFound: invoice.differenceFound,
         differenceSummary: invoice.differenceSummary,
         syncStatus: invoice.syncStatus,
-        lineItems: [],
+        lineItems: extractLineItems(record),
         crmContext: {
           accountName: invoice.crmAccountName,
           dealName: invoice.crmDealName,
@@ -577,6 +601,8 @@ function createCreatorService(api, config) {
 }
 
 export function resolveInvoiceApprovalConfig(widgetParams = {}, initData = {}) {
+  const parsedAutoRefreshIntervalMs = Number(widgetParams.autoRefreshIntervalMs);
+
   return {
     creatorAppName: getFirstString(
       widgetParams.creatorAppName,
@@ -600,6 +626,10 @@ export function resolveInvoiceApprovalConfig(widgetParams = {}, initData = {}) {
     crmContextFunctionName: getFirstString(widgetParams.crmContextFunctionName, "getCrmContextForInvoice"),
     approvalActionFunctionName: getFirstString(widgetParams.approvalActionFunctionName, "approveInvoice"),
     inboxDefaultStatusFilter: getFirstString(widgetParams.inboxDefaultStatusFilter, "All"),
+    autoRefreshIntervalMs:
+      Number.isFinite(parsedAutoRefreshIntervalMs) && parsedAutoRefreshIntervalMs > 0
+        ? parsedAutoRefreshIntervalMs
+        : 30000,
   };
 }
 

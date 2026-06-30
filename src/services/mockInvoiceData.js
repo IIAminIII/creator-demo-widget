@@ -57,9 +57,9 @@ export function createMockInvoiceStore() {
       differenceSummary: "No Difference",
       syncStatus: "Synced",
       lineItems: [
-        { id: "L1", description: "Implementation retainer", quantity: 1, rate: 8000, total: 8000 },
-        { id: "L2", description: "Data migration setup", quantity: 1, rate: 2500, total: 2500 },
-        { id: "L3", description: "Training session", quantity: 1, rate: 1950, total: 1950 },
+        { id: "L1", name: "Implementation retainer", description: "Phase 1 delivery retainer", quantity: 1, rate: 8000, discount: 0, taxName: "VAT", taxPercentage: 5, itemTotal: 8400 },
+        { id: "L2", name: "Data migration setup", description: "Migration and source mapping", quantity: 1, rate: 2500, discount: 200, taxName: "VAT", taxPercentage: 5, itemTotal: 2415 },
+        { id: "L3", name: "Training session", description: "Remote enablement workshop", quantity: 1, rate: 1950, discount: 0, taxName: "VAT", taxPercentage: 5, itemTotal: 2048 },
       ],
       crmContext: {
         accountName: "Northwind Health",
@@ -110,8 +110,9 @@ export function createMockInvoiceStore() {
       differenceSummary: "PO reference and billing structure do not match the Creator approval snapshot.",
       syncStatus: "Difference Found",
       lineItems: [
-        { id: "L1", description: "Monthly platform fee", quantity: 3, rate: 1200, total: 3600 },
-        { id: "L2", description: "Support bundle", quantity: 1, rate: 1800, total: 1800 },
+        { id: "L1", name: "Monthly platform fee", description: "Warehouse automation subscription", quantity: 3, rate: 1200, discount: 0, taxName: "VAT", taxPercentage: 5, itemTotal: 3780 },
+        { id: "L2", name: "Support bundle", description: "Priority support and onboarding", quantity: 1, rate: 1800, discount: 180, taxName: "VAT", taxPercentage: 5, itemTotal: 1701 },
+        { id: "L3", name: "PO handling fee", description: "Documentation processing adjustment", quantity: 1, rate: 300, discount: 0, taxName: "VAT", taxPercentage: 5, itemTotal: 315 },
       ],
       crmContext: {
         accountName: "BluePeak Logistics",
@@ -160,8 +161,9 @@ export function createMockInvoiceStore() {
       differenceSummary: "No Difference",
       syncStatus: "Manual Review",
       lineItems: [
-        { id: "L1", description: "POS integration milestone 2", quantity: 1, rate: 15000, total: 15000 },
-        { id: "L2", description: "Regional training package", quantity: 1, rate: 3900, total: 3900 },
+        { id: "L1", name: "POS integration milestone 2", description: "Store rollout milestone", quantity: 1, rate: 15000, discount: 500, taxName: "VAT", taxPercentage: 5, itemTotal: 15225 },
+        { id: "L2", name: "Regional training package", description: "Onsite training for regional managers", quantity: 1, rate: 3900, discount: 0, taxName: "VAT", taxPercentage: 5, itemTotal: 4095 },
+        { id: "L3", name: "Travel surcharge", description: "Regional deployment travel cost", quantity: 1, rate: 500, discount: 0, taxName: "VAT", taxPercentage: 5, itemTotal: 525 },
       ],
       crmContext: {
         accountName: "Crescent Retail Group",

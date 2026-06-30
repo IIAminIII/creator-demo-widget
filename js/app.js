@@ -26,6 +26,8 @@ const state = {
   inboxError: null,
   detailError: null,
   config: null,
+  autoRefreshTimer: null,
+  autoRefreshInFlight: false,
 };
 
 const elements = {};
@@ -71,6 +73,18 @@ function formatShortDate(value) {
   }
 
   return parsed.toLocaleDateString();
+}
+
+function formatLineItemTax(line) {
+  if (!line?.taxName && !line?.taxPercentage) {
+    return "N/A";
+  }
+
+  if (line.taxName && line.taxPercentage) {
+    return `${line.taxName} (${line.taxPercentage}%)`;
+  }
+
+  return line.taxName || `${line.taxPercentage}%`;
 }
 
 function normalizeText(value) {
@@ -431,11 +445,16 @@ function renderDetail() {
         .map(
           (line) => `
             <tr>
+              <td>${escapeHtml(line.name || "Item")}</td>
               <td>${escapeHtml(line.description)}</td>
               <td>${escapeHtml(line.quantity)}</td>
               <td>${escapeHtml(
                 formatCurrency(line.rate, invoice.currencyCode),
               )}</td>
+              <td>${escapeHtml(
+                formatCurrency(line.discount, invoice.currencyCode),
+              )}</td>
+              <td>${escapeHtml(formatLineItemTax(line))}</td>
               <td>${escapeHtml(
                 formatCurrency(line.total, invoice.currencyCode),
               )}</td>
@@ -445,7 +464,7 @@ function renderDetail() {
         .join("")
     : `
       <tr>
-        <td colspan="4">No Books line-item snapshot is available yet.</td>
+        <td colspan="7">No line items found for this invoice.</td>
       </tr>
     `;
 
@@ -524,7 +543,8 @@ function renderDetail() {
     <section class="detail-grid">
       <article class="detail-card">
         <div class="section-tag tag-books">Books Snapshot</div>
-        <h3>Invoice summary</h3>
+        <h3>Invoice Line Items</h3>
+        <p>Items and charges pulled from the linked Zoho Books invoice.</p>
         <div class="triple-grid">
           <div class="mini-card">
             <div class="mini-label">Customer</div>
@@ -541,17 +561,22 @@ function renderDetail() {
             <div class="mini-value">${escapeHtml(formatShortDate(invoice.dueDate))}</div>
           </div>
         </div>
-        <table class="snapshot-table">
+        <div class="line-items-table-wrap">
+        <table class="snapshot-table line-items-table">
           <thead>
             <tr>
+              <th>Item</th>
               <th>Description</th>
               <th>Qty</th>
               <th>Rate</th>
+              <th>Discount</th>
+              <th>Tax</th>
               <th>Total</th>
             </tr>
           </thead>
           <tbody>${lineRows}</tbody>
         </table>
+        </div>
         <div class="meta-row">
           <span>Books invoice ID ${escapeHtml(invoice.booksInvoiceId)}</span>
           <span>Invoice date ${escapeHtml(formatShortDate(invoice.invoiceDate))}</span>
@@ -732,8 +757,17 @@ function wireDetailActions() {
         state.selectedRecordId,
       );
       syncInboxItemFromDetail(state.selectedDetail);
+      await loadInbox({
+        preserveSelectedRecordId: state.selectedRecordId,
+        silent: true,
+      });
+      if (state.selectedRecordId) {
+        await loadDetailWithOptions(state.selectedRecordId, { silent: true });
+        syncInboxItemFromDetail(state.selectedDetail);
+      }
       state.detailError = null;
       renderInbox();
+      renderDetail();
       showToast("Books snapshot refreshed.");
     } catch (error) {
       state.detailError = error;
@@ -810,9 +844,13 @@ function wireDetailRetryButton() {
 
 async function loadInbox(options = {}) {
   const preserveSelectedRecordId = options.preserveSelectedRecordId || "";
-  state.loadingInbox = true;
-  state.inboxError = null;
-  renderInbox();
+  const silent = options.silent === true;
+
+  if (!silent) {
+    state.loadingInbox = true;
+    state.inboxError = null;
+    renderInbox();
+  }
 
   try {
     const response = await state.service.loadInbox(state.filters);
@@ -831,9 +869,13 @@ async function loadInbox(options = {}) {
     }
   } catch (error) {
     state.inboxError = error;
-    showToast(getErrorMessage(error, "Failed to load the invoice inbox."), "error");
+    if (!silent) {
+      showToast(getErrorMessage(error, "Failed to load the invoice inbox."), "error");
+    }
   } finally {
-    state.loadingInbox = false;
+    if (!silent) {
+      state.loadingInbox = false;
+    }
     renderKpis();
     renderToolbarSummary();
     renderInbox();
@@ -841,6 +883,10 @@ async function loadInbox(options = {}) {
 }
 
 async function loadDetail(recordId) {
+  return loadDetailWithOptions(recordId, {});
+}
+
+async function loadDetailWithOptions(recordId, options = {}) {
   if (!recordId) {
     state.selectedDetail = null;
     state.detailError = null;
@@ -848,19 +894,74 @@ async function loadDetail(recordId) {
     return;
   }
 
-  state.loadingDetail = true;
-  state.detailError = null;
-  renderDetail();
+  const silent = options.silent === true;
+
+  if (!silent) {
+    state.loadingDetail = true;
+    state.detailError = null;
+    renderDetail();
+  }
 
   try {
     state.selectedDetail = await state.service.loadInvoiceDetail(recordId);
   } catch (error) {
     state.detailError = error;
-    showToast(getErrorMessage(error, "Failed to load invoice detail."), "error");
+    if (!silent) {
+      showToast(getErrorMessage(error, "Failed to load invoice detail."), "error");
+    }
   } finally {
-    state.loadingDetail = false;
+    if (!silent) {
+      state.loadingDetail = false;
+    }
     renderDetail();
   }
+}
+
+async function runAutoRefreshCycle() {
+  if (
+    state.autoRefreshInFlight ||
+    state.loadingInbox ||
+    state.loadingDetail ||
+    state.busyAction
+  ) {
+    return;
+  }
+
+  state.autoRefreshInFlight = true;
+
+  try {
+    await loadInbox({
+      preserveSelectedRecordId: state.selectedRecordId,
+      silent: true,
+    });
+
+    if (state.selectedRecordId) {
+      await loadDetailWithOptions(state.selectedRecordId, { silent: true });
+      syncInboxItemFromDetail(state.selectedDetail);
+      renderInbox();
+    }
+  } catch (error) {
+    console.warn("Auto refresh failed:", error);
+  } finally {
+    state.autoRefreshInFlight = false;
+  }
+}
+
+function startAutoRefresh() {
+  const intervalMs = Number(state.config?.autoRefreshIntervalMs || 0);
+
+  if (state.autoRefreshTimer) {
+    window.clearInterval(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
+  }
+
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return;
+  }
+
+  state.autoRefreshTimer = window.setInterval(() => {
+    void runAutoRefreshCycle();
+  }, intervalMs);
 }
 
 async function runAction(callback, successMessage = "Workflow action completed successfully.") {
@@ -940,6 +1041,7 @@ async function bootstrap() {
   state.runtimeInfo = await state.service.init();
   updateRuntimeHeader();
   bindToolbar();
+  startAutoRefresh();
   renderKpis();
   renderToolbarSummary();
   renderInbox();

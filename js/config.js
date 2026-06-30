@@ -8,6 +8,7 @@ function getEnvValue(key, fallback = "") {
 
 export const APP_CONFIG = {
   useMockData: false,
+  autoRefreshIntervalMs: 30000,
   creatorSdkUrl:
     "https://static.zohocdn.com/creator/widgets/version/2.0/widgetsdk-min.js",
   currentReviewerName: "Finance Ops Reviewer",
@@ -72,6 +73,10 @@ function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
   return {
     ...baseConfig,
     useMockData: resolvedUseMockData,
+    autoRefreshIntervalMs:
+      Number(widgetParams.autoRefreshIntervalMs || baseConfig.autoRefreshIntervalMs) > 0
+        ? Number(widgetParams.autoRefreshIntervalMs || baseConfig.autoRefreshIntervalMs)
+        : baseConfig.autoRefreshIntervalMs,
     currentReviewerName:
       widgetParams.currentReviewerName || baseConfig.currentReviewerName,
     creator: {
