@@ -35,6 +35,9 @@ function createDetailRecord(seed) {
       approvalDecisionDate: seed.approvalDecisionDate,
       lastBooksSyncAt: seed.lastBooksSyncAt,
       lastCrmEnrichmentAt: seed.lastCrmEnrichmentAt,
+      lastComparedAt: seed.lastComparedAt,
+      differenceFound: seed.differenceFound,
+      differenceSummary: seed.differenceSummary,
       syncStatus: seed.syncStatus,
     },
     comments: seed.comments,
@@ -63,7 +66,10 @@ export function createMockState() {
       approvalDecisionDate: "",
       lastBooksSyncAt: isoDate(-1),
       lastCrmEnrichmentAt: isoDate(-1),
-      syncStatus: "Healthy",
+      lastComparedAt: isoDate(-1),
+      differenceFound: false,
+      differenceSummary: "No Difference",
+      syncStatus: "Synced",
       lineItems: [
         {
           id: "LI-1",
@@ -135,7 +141,11 @@ export function createMockState() {
       approvalDecisionDate: "",
       lastBooksSyncAt: isoDate(-2),
       lastCrmEnrichmentAt: isoDate(-1),
-      syncStatus: "Books Review Needed",
+      lastComparedAt: isoDate(-1),
+      differenceFound: true,
+      differenceSummary:
+        "PO number and billing split need manual validation against the Creator approval snapshot.",
+      syncStatus: "Difference Found",
       lineItems: [
         {
           id: "LI-3",
@@ -205,7 +215,10 @@ export function createMockState() {
       approvalDecisionDate: "",
       lastBooksSyncAt: isoDate(-1),
       lastCrmEnrichmentAt: isoDate(-1),
-      syncStatus: "Healthy",
+      lastComparedAt: isoDate(-1),
+      differenceFound: false,
+      differenceSummary: "No Difference",
+      syncStatus: "Manual Review",
       lineItems: [
         {
           id: "LI-5",
@@ -266,7 +279,10 @@ export function createMockState() {
       approvalDecisionDate: isoDate(-3),
       lastBooksSyncAt: isoDate(-3),
       lastCrmEnrichmentAt: isoDate(-3),
-      syncStatus: "Healthy",
+      lastComparedAt: isoDate(-3),
+      differenceFound: true,
+      differenceSummary: "Discount terms in Books differ from the approved commercial quote.",
+      syncStatus: "Failed",
       lineItems: [
         {
           id: "LI-7",

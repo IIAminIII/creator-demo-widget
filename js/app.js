@@ -73,6 +73,61 @@ function formatShortDate(value) {
   return parsed.toLocaleDateString();
 }
 
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeDifferenceFound(value, summary = "") {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "yes", "1", "found", "difference found"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "no", "0", "none", "no difference"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return summary.trim().toLowerCase() === "no difference" ? false : null;
+}
+
+function deriveSyncCheck(approval = {}) {
+  const differenceFound = normalizeDifferenceFound(
+    approval.differenceFound,
+    approval.differenceSummary || "",
+  );
+  const differenceLabel =
+    differenceFound === true
+      ? "Difference Found"
+      : differenceFound === false
+        ? "No Difference"
+        : "Manual Review";
+
+  return {
+    status:
+      normalizeText(approval.syncStatus) ||
+      (differenceFound === true
+        ? "Difference Found"
+        : differenceFound === false
+          ? "Synced"
+          : "Manual Review"),
+    lastBooksSyncAt: approval.lastBooksSyncAt || "",
+    lastComparedAt: approval.lastComparedAt || "",
+    differenceLabel,
+    differenceSummary:
+      normalizeText(approval.differenceSummary) ||
+      (differenceFound === true
+        ? "Difference Found"
+        : differenceFound === false
+          ? "No Difference"
+          : "Not compared yet"),
+  };
+}
+
 function statusClass(label) {
   return `status-${String(label).toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
 }
@@ -316,6 +371,7 @@ function renderDetail() {
   const invoice = detail.invoice;
   const approval = detail.approval;
   const crm = detail.crmContext;
+  const syncCheck = deriveSyncCheck(approval);
   const detailErrorMarkup = state.detailError
     ? `
       <div class="section-hint">
@@ -514,6 +570,40 @@ function renderDetail() {
               ? formatDate(approval.approvalDecisionDate)
               : "Not decided",
           )}</span>
+        </div>
+      </article>
+
+      <article class="detail-card">
+        <div class="section-tag tag-books">Books Sync Check</div>
+        <h3>Sync Status</h3>
+        <p>
+          Compare the Creator approval snapshot with the latest invoice data from Zoho Books.
+        </p>
+        <div class="meta-grid">
+          <div class="mini-card">
+            <div class="mini-label">Sync Status</div>
+            <div class="mini-value">${escapeHtml(syncCheck.status)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Difference Found</div>
+            <div class="mini-value">${escapeHtml(syncCheck.differenceLabel)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Last Books Sync At</div>
+            <div class="mini-value">${escapeHtml(
+              formatDate(syncCheck.lastBooksSyncAt),
+            )}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Last Compared At</div>
+            <div class="mini-value">${escapeHtml(
+              formatDate(syncCheck.lastComparedAt),
+            )}</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-label">Difference Summary</div>
+          <div class="mini-value">${escapeHtml(syncCheck.differenceSummary)}</div>
         </div>
       </article>
 

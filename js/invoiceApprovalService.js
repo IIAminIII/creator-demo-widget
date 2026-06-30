@@ -471,6 +471,17 @@ function mapApprovalRecord(record) {
     lastCrmEnrichmentAt: String(
       getNestedValue(record, ["Last_CRM_Enrichment_At", "lastCrmEnrichmentAt"], ""),
     ),
+    lastComparedAt: String(
+      getNestedValue(record, ["Last_Compared_At", "lastComparedAt"], ""),
+    ),
+    differenceFound: getNestedValue(
+      record,
+      ["Difference_Found", "differenceFound"],
+      null,
+    ),
+    differenceSummary: String(
+      getNestedValue(record, ["Difference_Summary", "differenceSummary"], ""),
+    ),
     crmAccountName: String(getNestedValue(record, ["CRM_Account_Name"], "")),
     crmDealName: String(getNestedValue(record, ["CRM_Deal_Name"], "")),
     accountOwner: String(
@@ -637,6 +648,9 @@ function mapApiInvoiceDetail(detail) {
       ),
       lastBooksSyncAt: approvalRecord.lastBooksSyncAt,
       lastCrmEnrichmentAt: approvalRecord.lastCrmEnrichmentAt,
+      lastComparedAt: approvalRecord.lastComparedAt,
+      differenceFound: approvalRecord.differenceFound,
+      differenceSummary: approvalRecord.differenceSummary,
       syncStatus: approvalRecord.syncStatus,
     },
     comments: toArray(detail?.comments).map(mapCommentRecord),
@@ -1110,6 +1124,9 @@ function createCreatorService(config, creator, widgetContext) {
           approvalDecisionDate: approvalRecord.approvalDecisionDate,
           lastBooksSyncAt: booksDetail.lastBooksSyncAt,
           lastCrmEnrichmentAt: approvalRecord.lastCrmEnrichmentAt,
+          lastComparedAt: approvalRecord.lastComparedAt,
+          differenceFound: approvalRecord.differenceFound,
+          differenceSummary: approvalRecord.differenceSummary,
           syncStatus: approvalRecord.syncStatus,
         },
         comments,

@@ -126,6 +126,13 @@ function normalizeCreatorRecord(record) {
     decisionDate: getFirstString(record.Approval_Decision_Date),
     lastBooksSyncAt: getFirstString(record.Last_Books_Sync_At),
     lastCrmEnrichmentAt: getFirstString(record.Last_CRM_Enrichment_At),
+    lastComparedAt: getFirstString(record.Last_Compared_At, record.lastComparedAt),
+    differenceFound: record.Difference_Found ?? record.differenceFound ?? null,
+    differenceSummary: getFirstString(
+      record.Difference_Summary,
+      record.differenceSummary,
+    ),
+    syncStatus: getFirstString(record.Sync_Status, record.syncStatus),
   };
 }
 
@@ -356,6 +363,10 @@ function createCreatorService(api, config) {
 
       return {
         ...invoice,
+        lastComparedAt: invoice.lastComparedAt,
+        differenceFound: invoice.differenceFound,
+        differenceSummary: invoice.differenceSummary,
+        syncStatus: invoice.syncStatus,
         lineItems: [],
         crmContext: {
           accountName: invoice.crmAccountName,

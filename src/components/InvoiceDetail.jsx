@@ -9,6 +9,69 @@ function formatCurrency(value, currencyCode) {
   }).format(Number(value || 0));
 }
 
+function formatDateTime(value) {
+  if (!value) {
+    return "Not available";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString();
+}
+
+function normalizeDifferenceFound(value, summary = "") {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "yes", "1", "found", "difference found"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "no", "0", "none", "no difference"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return summary.trim().toLowerCase() === "no difference" ? false : null;
+}
+
+function deriveSyncStatus(detail) {
+  const differenceFound = normalizeDifferenceFound(
+    detail?.differenceFound,
+    detail?.differenceSummary || "",
+  );
+  const fallbackSummary =
+    differenceFound === true
+      ? "Difference Found"
+      : differenceFound === false
+        ? "No Difference"
+        : "Not compared yet";
+  const status = detail?.syncStatus?.trim()
+    || (differenceFound === true
+      ? "Difference Found"
+      : differenceFound === false
+        ? "Synced"
+        : "Manual Review");
+
+  return {
+    status,
+    lastBooksSyncAt: detail?.lastBooksSyncAt || "",
+    lastComparedAt: detail?.lastComparedAt || "",
+    differenceLabel:
+      differenceFound === true
+        ? "Difference Found"
+        : differenceFound === false
+          ? "No Difference"
+          : "Manual Review",
+    differenceSummary: detail?.differenceSummary?.trim() || fallbackSummary,
+  };
+}
+
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 function isStaleSyncAt(syncAtString) {
@@ -50,6 +113,7 @@ export default function InvoiceDetail({
 
   const staleSync = detail ? isStaleSyncAt(detail.lastBooksSyncAt) : false;
   const overdue = detail ? isOverdue(detail.dueDate) && detail.approvalStatus !== "Approved" && detail.approvalStatus !== "Rejected" : false;
+  const syncCard = detail ? deriveSyncStatus(detail) : null;
 
   if (loading) {
     return (
@@ -160,6 +224,40 @@ export default function InvoiceDetail({
 
         <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
           <section className="space-y-6">
+            <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
+                Books Sync Check
+              </div>
+              <h4 className="mt-3 text-lg font-semibold text-slate-900">Sync Status</h4>
+              <p className="mt-2 text-sm text-slate-500">
+                Compare the Creator approval snapshot with the latest invoice data from Zoho Books.
+              </p>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Sync Status</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{syncCard.status}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Difference Found</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{syncCard.differenceLabel}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Books Sync At</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(syncCard.lastBooksSyncAt)}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Compared At</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(syncCard.lastComparedAt)}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Difference Summary</p>
+                <p className="mt-2 text-sm leading-6 text-slate-700">{syncCard.differenceSummary}</p>
+              </div>
+            </div>
+
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
               <h4 className="text-lg font-semibold text-slate-900">Books invoice snapshot</h4>
               <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
