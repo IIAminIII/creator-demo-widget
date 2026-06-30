@@ -46,6 +46,27 @@ function StatCard({ label, value, helper }) {
   );
 }
 
+function toInboxItemFromDetail(detail) {
+  if (!detail) {
+    return null;
+  }
+
+  return {
+    approvalRecordId: detail.approvalRecordId || "",
+    booksInvoiceId: detail.booksInvoiceId || "",
+    invoiceNumber: detail.invoiceNumber || "",
+    customerName: detail.customerName || "",
+    invoiceTotal: Number(detail.invoiceTotal || 0),
+    currencyCode: detail.currencyCode || "USD",
+    dueDate: detail.dueDate || "",
+    booksStatus: detail.booksStatus || "Unknown",
+    paymentStatus: detail.paymentStatus || "Unknown",
+    approvalStatus: detail.approvalStatus || "New",
+    priority: detail.priority || "Medium",
+    crmAccountName: detail.crmAccountName || detail.crmContext?.accountName || "",
+  };
+}
+
 export default function App() {
   const {
     api,
@@ -149,8 +170,27 @@ export default function App() {
 
     try {
       const detail = await action();
+      const refreshedInboxItem = toInboxItemFromDetail(detail);
       setSelectedDetail(detail);
+      if (refreshedInboxItem?.approvalRecordId) {
+        setInboxItems((current) =>
+          current.map((item) =>
+            item.approvalRecordId === refreshedInboxItem.approvalRecordId
+              ? { ...item, ...refreshedInboxItem }
+              : item,
+          ),
+        );
+      }
       await loadInbox();
+      if (refreshedInboxItem?.approvalRecordId) {
+        setInboxItems((current) =>
+          current.map((item) =>
+            item.approvalRecordId === refreshedInboxItem.approvalRecordId
+              ? { ...item, ...refreshedInboxItem }
+              : item,
+          ),
+        );
+      }
       setSuccessMessage("Workflow action completed successfully.");
     } catch (error) {
       setErrorMessage(getErrorMessage(error, "The workflow action could not be completed."));

@@ -227,6 +227,47 @@ function renderToolbarSummary() {
     .join("");
 }
 
+function toInboxItemFromDetail(detail) {
+  if (!detail?.invoice || !detail?.approval) {
+    return null;
+  }
+
+  return {
+    approvalRecordId: detail.approvalRecordId || "",
+    booksInvoiceId: detail.invoice.booksInvoiceId || "",
+    invoiceNumber: detail.invoice.invoiceNumber || "",
+    customerName: detail.invoice.customerName || "",
+    invoiceTotal: Number(detail.invoice.invoiceTotal || 0),
+    currencyCode: detail.invoice.currencyCode || "USD",
+    dueDate: detail.invoice.dueDate || "",
+    booksStatus: detail.invoice.booksStatus || "Unknown",
+    paymentStatus: detail.invoice.paymentStatus || "Unknown",
+    approvalStatus: detail.approval.approvalStatus || "Pending Review",
+    priority: detail.approval.priority || "Medium",
+    crmAccountName: detail.crmContext?.crmAccountName || detail.invoice.crmAccountName || "",
+  };
+}
+
+function syncInboxItemFromDetail(detail) {
+  const nextItem = toInboxItemFromDetail(detail);
+  if (!nextItem?.approvalRecordId) {
+    return;
+  }
+
+  const index = state.inboxItems.findIndex(
+    (item) => item.approvalRecordId === nextItem.approvalRecordId,
+  );
+
+  if (index === -1) {
+    return;
+  }
+
+  state.inboxItems[index] = {
+    ...state.inboxItems[index],
+    ...nextItem,
+  };
+}
+
 function renderInbox() {
   if (state.loadingInbox) {
     elements.inboxList.classList.remove("scrollable");
@@ -690,7 +731,9 @@ function wireDetailActions() {
       state.selectedDetail = await state.service.refreshBooksInvoiceSnapshot(
         state.selectedRecordId,
       );
+      syncInboxItemFromDetail(state.selectedDetail);
       state.detailError = null;
+      renderInbox();
       showToast("Books snapshot refreshed.");
     } catch (error) {
       state.detailError = error;
