@@ -682,8 +682,9 @@ button {
 
 .toast-region {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   z-index: 1000;
   display: grid;
   gap: 10px;
