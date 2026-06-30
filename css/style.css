@@ -701,6 +701,51 @@ button {
   line-height: 1.5;
 }
 
+.toast-title {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.toast-message {
+  margin-top: 6px;
+}
+
+.toast-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.toast-list-item {
+  color: var(--text-muted);
+}
+
+.toast-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.toast-action {
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  background: #fff;
+  color: var(--text);
+}
+
+.toast-action.primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.toast-action.secondary {
+  border-color: var(--border);
+}
+
 .toast.success {
   border-color: rgba(31, 157, 103, 0.25);
   background: var(--success-soft);
@@ -709,6 +754,11 @@ button {
 .toast.error {
   border-color: rgba(208, 75, 75, 0.24);
   background: var(--danger-soft);
+}
+
+.toast.warning {
+  border-color: rgba(197, 133, 18, 0.24);
+  background: var(--warning-soft);
 }
 
 .badge {

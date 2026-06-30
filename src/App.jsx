@@ -104,16 +104,74 @@ export default function App() {
   const [inboxLoading, setInboxLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
   const [guardrailCheck, setGuardrailCheck] = useState(null);
+  const [toasts, setToasts] = useState([]);
+
+  function dismissToast(toastId) {
+    setToasts((current) => current.filter((toast) => toast.id !== toastId));
+  }
+
+  function pushToast({
+    type = "success",
+    title = "",
+    message,
+    details = [],
+    autoCloseMs = 3200,
+    actions = [],
+  }) {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const toast = { id, type, title, message, details, actions };
+
+    setToasts((current) => [...current, toast]);
+
+    if (actions.length || autoCloseMs <= 0) {
+      return id;
+    }
+
+    window.setTimeout(() => {
+      dismissToast(id);
+    }, autoCloseMs);
+
+    return id;
+  }
+
+  function showConfirmationToast(validation) {
+    return new Promise((resolve) => {
+      const id = pushToast({
+        type: "warning",
+        title: "Approval Warning",
+        message:
+          validation.message ||
+          "Approval can continue, but reviewer confirmation is recommended.",
+        details: [...(validation.warningReasons || []), "Continue with approval?"],
+        autoCloseMs: 0,
+        actions: [
+          {
+            label: "Continue",
+            variant: "primary",
+            onClick: () => {
+              dismissToast(id);
+              resolve(true);
+            },
+          },
+          {
+            label: "Cancel",
+            variant: "secondary",
+            onClick: () => {
+              dismissToast(id);
+              resolve(false);
+            },
+          },
+        ],
+      });
+    });
+  }
 
   async function loadInbox(nextFilters = filters, options = {}) {
     const silent = options.silent === true;
 
     if (!silent) {
       setInboxLoading(true);
-      setErrorMessage("");
     }
 
     try {
@@ -131,7 +189,11 @@ export default function App() {
       }
     } catch (error) {
       if (!silent) {
-        setErrorMessage(getErrorMessage(error, "Failed to load the invoice inbox."));
+        pushToast({
+          type: "error",
+          title: "Inbox Refresh Failed",
+          message: getErrorMessage(error, "Failed to load the invoice inbox."),
+        });
       }
     } finally {
       if (!silent) {
@@ -151,7 +213,6 @@ export default function App() {
 
     if (!silent) {
       setDetailLoading(true);
-      setErrorMessage("");
     }
 
     try {
@@ -160,7 +221,11 @@ export default function App() {
       setGuardrailCheck(null);
     } catch (error) {
       if (!silent) {
-        setErrorMessage(getErrorMessage(error, "Failed to load the invoice detail."));
+        pushToast({
+          type: "error",
+          title: "Detail Refresh Failed",
+          message: getErrorMessage(error, "Failed to load the invoice detail."),
+        });
       }
     } finally {
       if (!silent) {
@@ -215,8 +280,6 @@ export default function App() {
 
   async function runAction(action) {
     setActionLoading(true);
-    setErrorMessage("");
-    setSuccessMessage("");
 
     try {
       const detail = await action();
@@ -242,28 +305,20 @@ export default function App() {
           ),
         );
       }
-      setSuccessMessage("Workflow action completed successfully.");
+      pushToast({
+        type: "success",
+        title: "Success",
+        message: "Workflow action completed successfully.",
+      });
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, "The workflow action could not be completed."));
+      pushToast({
+        type: "error",
+        title: "Action Failed",
+        message: getErrorMessage(error, "The workflow action could not be completed."),
+      });
     } finally {
       setActionLoading(false);
     }
-  }
-
-  function buildApprovalWarningMessage(validation) {
-    const lines = [
-      validation.message || "Approval has warnings that need confirmation.",
-    ];
-
-    if (validation.warningReasons?.length) {
-      lines.push("", "Warnings:");
-      validation.warningReasons.forEach((reason) => {
-        lines.push(`- ${reason}`);
-      });
-    }
-
-    lines.push("", "Continue with approval?");
-    return lines.join("\n");
   }
 
   async function runApprovalSafetyCheck(options = {}) {
@@ -275,8 +330,6 @@ export default function App() {
 
     if (!silent) {
       setActionLoading(true);
-      setErrorMessage("");
-      setSuccessMessage("");
     }
 
     try {
@@ -284,17 +337,26 @@ export default function App() {
       setGuardrailCheck(validation);
 
       if (!silent) {
-        setSuccessMessage(
-          validation.canApprove
+        pushToast({
+          type: validation.canApprove ? "success" : "error",
+          title: validation.canApprove ? "Approval Safety" : "Approval Blocked",
+          message: validation.canApprove
             ? "Approval safety check completed successfully."
-            : "Approval is currently blocked.",
-        );
+            : validation.message || "Approval is currently blocked.",
+          details: validation.canApprove
+            ? []
+            : validation.blockingReasons || [],
+        });
       }
 
       return validation;
     } catch (error) {
       if (!silent) {
-        setErrorMessage(getErrorMessage(error, "Failed to validate invoice approval."));
+        pushToast({
+          type: "error",
+          title: "Guardrail Check Failed",
+          message: getErrorMessage(error, "Failed to validate invoice approval."),
+        });
       }
       throw error;
     } finally {
@@ -306,27 +368,31 @@ export default function App() {
 
   async function runApproveAction(payload) {
     setActionLoading(true);
-    setErrorMessage("");
-    setSuccessMessage("");
 
     try {
       const validation = await service.validateInvoiceApproval(selectedRecordId);
       setGuardrailCheck(validation);
 
       if (!validation.canApprove) {
-        const blockingMessage =
-          validation.blockingReasons?.join(" ") ||
-          validation.message ||
-          "Approval is blocked.";
-        setErrorMessage(blockingMessage);
+        pushToast({
+          type: "error",
+          title: "Approval Blocked",
+          message: validation.message || "Approval is blocked.",
+          details: validation.blockingReasons || [],
+          autoCloseMs: 4800,
+        });
         return;
       }
 
       if (validation.warningReasons?.length) {
-        const confirmed = window.confirm(buildApprovalWarningMessage(validation));
+        const confirmed = await showConfirmationToast(validation);
 
         if (!confirmed) {
-          setSuccessMessage("Approval cancelled after warning review.");
+          pushToast({
+            type: "warning",
+            title: "Approval Cancelled",
+            message: "Approval cancelled after warning review.",
+          });
           return;
         }
       }
@@ -358,9 +424,17 @@ export default function App() {
         );
       }
 
-      setSuccessMessage("Invoice approved successfully.");
+      pushToast({
+        type: "success",
+        title: "Invoice Approved",
+        message: "Invoice approved successfully.",
+      });
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, "The approval action could not be completed."));
+      pushToast({
+        type: "error",
+        title: "Approval Failed",
+        message: getErrorMessage(error, "The approval action could not be completed."),
+      });
     } finally {
       setActionLoading(false);
     }
@@ -475,17 +549,6 @@ export default function App() {
           </span>
         </div>
 
-        {errorMessage ? (
-          <div className="alert alert-error mt-5">
-            <span>{errorMessage}</span>
-          </div>
-        ) : null}
-
-        {successMessage ? (
-          <div className="alert alert-success mt-5">
-            <span>{successMessage}</span>
-          </div>
-        ) : null}
       </section>
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
@@ -559,6 +622,38 @@ export default function App() {
           )}
         </pre>
       </section>
+
+      <div className="widget-toast-region">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`widget-toast widget-toast-${toast.type}`}>
+            {toast.title ? <div className="widget-toast-title">{toast.title}</div> : null}
+            <div className="widget-toast-message">{toast.message}</div>
+            {toast.details?.length ? (
+              <div className="widget-toast-list">
+                {toast.details.map((detail) => (
+                  <div key={`${toast.id}-${detail}`} className="widget-toast-list-item">
+                    {detail}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {toast.actions?.length ? (
+              <div className="widget-toast-actions">
+                {toast.actions.map((action) => (
+                  <button
+                    key={`${toast.id}-${action.label}`}
+                    type="button"
+                    className={`widget-toast-action widget-toast-action-${action.variant || "secondary"}`}
+                    onClick={action.onClick}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </main>
   );
 }

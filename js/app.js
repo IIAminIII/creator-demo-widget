@@ -194,22 +194,6 @@ function deriveGuardrailCheck(detail, validation = null) {
   };
 }
 
-function buildApprovalWarningMessage(validation) {
-  const lines = [
-    validation.message || "Approval has warnings that need confirmation.",
-  ];
-
-  if (validation.warningReasons?.length) {
-    lines.push("", "Warnings:");
-    validation.warningReasons.forEach((reason) => {
-      lines.push(`- ${reason}`);
-    });
-  }
-
-  lines.push("", "Continue with approval?");
-  return lines.join("\n");
-}
-
 function statusClass(label) {
   return `status-${String(label).toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
 }
@@ -222,14 +206,112 @@ function renderBadge(label, className) {
   return `<span class="badge ${className}">${escapeHtml(label)}</span>`;
 }
 
-function showToast(message, type = "success") {
+function removeToast(toast) {
+  toast?.remove();
+}
+
+function showToast(message, type = "success", options = {}) {
   const toast = document.createElement("div");
+  const title = options.title ? `<div class="toast-title">${escapeHtml(options.title)}</div>` : "";
+  const details = Array.isArray(options.details) && options.details.length
+    ? `
+      <div class="toast-list">
+        ${options.details
+          .map((detail) => `<div class="toast-list-item">${escapeHtml(detail)}</div>`)
+          .join("")}
+      </div>
+    `
+    : "";
+  const actions = Array.isArray(options.actions) && options.actions.length
+    ? `
+      <div class="toast-actions">
+        ${options.actions
+          .map(
+            (action, index) => `
+              <button
+                type="button"
+                class="toast-action ${escapeHtml(action.variant || "secondary")}"
+                data-toast-action="${index}"
+              >
+                ${escapeHtml(action.label)}
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+    `
+    : "";
+
   toast.className = `toast ${type}`;
-  toast.textContent = message;
+  toast.innerHTML = `
+    ${title}
+    <div class="toast-message">${escapeHtml(message)}</div>
+    ${details}
+    ${actions}
+  `;
   elements.toastRegion.appendChild(toast);
+
+  if (options.actions?.length) {
+    toast.querySelectorAll("[data-toast-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const actionIndex = Number(button.getAttribute("data-toast-action"));
+        const action = options.actions[actionIndex];
+        action?.onClick?.();
+        removeToast(toast);
+      });
+    });
+    return toast;
+  }
+
+  const autoCloseMs =
+    Number.isFinite(options.autoCloseMs) && options.autoCloseMs >= 0
+      ? options.autoCloseMs
+      : 3200;
+
   window.setTimeout(() => {
-    toast.remove();
-  }, 3200);
+    removeToast(toast);
+  }, autoCloseMs);
+
+  return toast;
+}
+
+function showApprovalConfirmationToast(validation) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const complete = (value, toast) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      removeToast(toast);
+      resolve(value);
+    };
+
+    const toast = showToast(
+      validation.message || "Approval can continue, but reviewer confirmation is recommended.",
+      "warning",
+      {
+        title: "Approval Warning",
+        details: [
+          ...(validation.warningReasons || []),
+          "Continue with approval?",
+        ],
+        autoCloseMs: 0,
+        actions: [
+          {
+            label: "Continue",
+            variant: "primary",
+            onClick: () => complete(true, toast),
+          },
+          {
+            label: "Cancel",
+            variant: "secondary",
+            onClick: () => complete(false, toast),
+          },
+        ],
+      },
+    );
+  });
 }
 
 function getReviewerFallback() {
@@ -967,11 +1049,10 @@ function wireDetailActions() {
       }
 
       if (state.guardrailCheck.warningReasons?.length) {
-        const confirmed = window.confirm(
-          buildApprovalWarningMessage(state.guardrailCheck),
-        );
+        const confirmed = await showApprovalConfirmationToast(state.guardrailCheck);
 
         if (!confirmed) {
+          showToast("Approval cancelled after warning review.", "warning");
           return;
         }
       }
