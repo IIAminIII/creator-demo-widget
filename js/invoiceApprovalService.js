@@ -44,8 +44,16 @@ function matchesFilters(item, filters = {}) {
   const status = filters.approvalStatus || "All";
   const search = normalizeText(filters.search).toLowerCase();
 
-  if (status !== "All" && item.approvalStatus !== status) {
-    return false;
+  if (status !== "All") {
+    const normalizedItemStatus = normalizeApprovalStatus(item.approvalStatus);
+    const statusMatches =
+      item.approvalStatus === status ||
+      normalizedItemStatus === status ||
+      (status === "New" && normalizedItemStatus === "Pending Review");
+
+    if (!statusMatches) {
+      return false;
+    }
   }
 
   if (!search) {
@@ -1001,8 +1009,9 @@ function createCreatorService(config, creator, widgetContext) {
           const items = normalized?.items || normalized?.data?.items;
 
           if (Array.isArray(items)) {
+            const filteredItems = items.filter((item) => matchesFilters(item, filters));
             return {
-              items: deepClone(items),
+              items: deepClone(filteredItems),
               summary: normalizeSummary(
                 normalized?.summary || normalized?.data?.summary,
                 items,
@@ -1048,7 +1057,7 @@ function createCreatorService(config, creator, widgetContext) {
         }
 
         return {
-          items,
+          items: items.filter((item) => matchesFilters(item, filters)),
           summary: normalizeSummary(
             normalized?.summary || normalized?.data?.summary,
             items,

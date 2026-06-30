@@ -54,8 +54,13 @@ function extractLineItems(detail = {}) {
 }
 
 function matchesFilter(item, filters) {
+  const normalizedStatus = normalizeStatus(item.approvalStatus);
   const statusMatches =
-    !filters.status || filters.status === "All" || item.approvalStatus === filters.status;
+    !filters.status ||
+    filters.status === "All" ||
+    item.approvalStatus === filters.status ||
+    normalizedStatus === filters.status ||
+    (filters.status === "New" && normalizedStatus === "Pending Review");
   const search = filters.search?.trim().toLowerCase();
 
   if (!search) {
