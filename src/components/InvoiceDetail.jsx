@@ -84,6 +84,59 @@ function deriveSyncStatus(detail) {
   };
 }
 
+function deriveApprovalGuardrail(detail, guardrailCheck) {
+  const differenceFound =
+    guardrailCheck?.differenceFound ??
+    normalizeDifferenceFound(
+      detail?.booksSyncDifferenceFound ??
+        detail?.booksSnapshotDifferenceFound ??
+        detail?.differenceFound,
+      detail?.differenceSummary || "",
+    );
+  const blockingReasons = Array.isArray(guardrailCheck?.blockingReasons)
+    ? guardrailCheck.blockingReasons.filter(Boolean)
+    : [];
+  const warningReasons = Array.isArray(guardrailCheck?.warningReasons)
+    ? guardrailCheck.warningReasons.filter(Boolean)
+    : [];
+  const canApprove =
+    typeof guardrailCheck?.canApprove === "boolean"
+      ? guardrailCheck.canApprove
+      : blockingReasons.length === 0;
+
+  return {
+    approvalStatus: guardrailCheck?.approvalStatus || detail?.approvalStatus || "Unknown",
+    syncStatus: guardrailCheck?.syncStatus || detail?.syncStatus || "Unknown",
+    booksPaymentStatus:
+      guardrailCheck?.booksPaymentStatus || detail?.paymentStatus || "Unknown",
+    differenceFound:
+      differenceFound === true
+        ? "Difference Found"
+        : differenceFound === false
+          ? "No Difference"
+          : "Manual Review",
+    lastBooksSyncAt: guardrailCheck?.lastBooksSyncAt || detail?.lastBooksSyncAt || "",
+    lastComparedAt:
+      guardrailCheck?.lastComparedAt ||
+      detail?.lastComparedAt ||
+      detail?.lastBooksComparedAt ||
+      "",
+    result:
+      !guardrailCheck
+        ? "Not Checked"
+        : !canApprove
+          ? "Blocked"
+          : warningReasons.length
+            ? "Manual Review"
+            : "Safe to Approve",
+    message:
+      guardrailCheck?.message ||
+      "Checks whether this invoice is safe to approve based on Books refresh, payment status, and difference result.",
+    blockingReasons,
+    warningReasons,
+  };
+}
+
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 function isStaleSyncAt(syncAtString) {
@@ -100,7 +153,9 @@ export default function InvoiceDetail({
   detail,
   loading,
   actionLoading,
+  guardrailCheck,
   onRefresh,
+  onCheckApprovalSafety,
   onApprove,
   onReject,
   onClarify,
@@ -126,6 +181,9 @@ export default function InvoiceDetail({
   const staleSync = detail ? isStaleSyncAt(detail.lastBooksSyncAt) : false;
   const overdue = detail ? isOverdue(detail.dueDate) && detail.approvalStatus !== "Approved" && detail.approvalStatus !== "Rejected" : false;
   const syncCard = detail ? deriveSyncStatus(detail) : null;
+  const approvalGuardrail = detail
+    ? deriveApprovalGuardrail(detail, guardrailCheck)
+    : null;
 
   if (loading) {
     return (
@@ -348,6 +406,77 @@ export default function InvoiceDetail({
           </section>
 
           <aside className="space-y-6">
+            <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
+                Approval Guardrails
+              </div>
+              <h4 className="mt-3 text-lg font-semibold text-slate-900">Approval Guardrails</h4>
+              <p className="mt-2 text-sm text-slate-500">
+                Checks whether this invoice is safe to approve based on Books refresh, payment status, and difference result.
+              </p>
+
+              <div className="mt-4 grid gap-3">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Approval Status</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{approvalGuardrail.approvalStatus}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Sync Status</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{approvalGuardrail.syncStatus}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Books Payment Status</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{approvalGuardrail.booksPaymentStatus}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Difference Found</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{approvalGuardrail.differenceFound}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Books Sync At</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(approvalGuardrail.lastBooksSyncAt)}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Compared At</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(approvalGuardrail.lastComparedAt)}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Guardrail Result</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{approvalGuardrail.result}</p>
+                </div>
+                {approvalGuardrail.blockingReasons.length ? (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-500">Blocking Reasons</p>
+                    <div className="mt-2 space-y-2 text-sm text-rose-800">
+                      {approvalGuardrail.blockingReasons.map((reason) => (
+                        <p key={reason}>{reason}</p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {approvalGuardrail.warningReasons.length ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-600">Warning Reasons</p>
+                    <div className="mt-2 space-y-2 text-sm text-amber-800">
+                      {approvalGuardrail.warningReasons.map((reason) => (
+                        <p key={reason}>{reason}</p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <p className="mt-4 text-sm text-slate-500">{approvalGuardrail.message}</p>
+              <button
+                type="button"
+                className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                disabled={actionLoading}
+                onClick={onCheckApprovalSafety}
+              >
+                Check Approval Safety
+              </button>
+            </div>
+
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
               <h4 className="text-lg font-semibold text-slate-900">CRM context</h4>
               <div className="mt-4 space-y-3 text-sm">

@@ -41,6 +41,7 @@ export const APP_CONFIG = {
       refreshBooksInvoiceSnapshot: getEnvValue(
         "VITE_CREATOR_REFRESH_BOOKS_INVOICE_SNAPSHOT_URL",
       ),
+      validateInvoiceApproval: getEnvValue("VITE_CREATOR_VALIDATE_INVOICE_APPROVAL_URL"),
       approveInvoice: getEnvValue("VITE_CREATOR_APPROVE_INVOICE_URL"),
       rejectInvoice: getEnvValue("VITE_CREATOR_REJECT_INVOICE_URL"),
       requestClarification: getEnvValue("VITE_CREATOR_REQUEST_CLARIFICATION_URL"),
@@ -125,6 +126,10 @@ function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
           widgetParams.refreshBooksInvoiceSnapshotFunctionName ||
           widgetParams.refreshBooksSnapshotFunctionName ||
           baseConfig.creator.customApis.refreshBooksInvoiceSnapshot,
+        validateInvoiceApproval:
+          widgetParams.validateInvoiceApprovalFunctionName ||
+          widgetParams.validateApprovalFunctionName ||
+          baseConfig.creator.customApis.validateInvoiceApproval,
         approveInvoice:
           widgetParams.approveInvoiceFunctionName ||
           baseConfig.creator.customApis.approveInvoice,

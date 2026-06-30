@@ -28,6 +28,7 @@ const state = {
   config: null,
   autoRefreshTimer: null,
   autoRefreshInFlight: false,
+  guardrailCheck: null,
 };
 
 const elements = {};
@@ -140,6 +141,73 @@ function deriveSyncCheck(approval = {}) {
           ? "No Difference"
           : "Not compared yet"),
   };
+}
+
+function deriveGuardrailCheck(detail, validation = null) {
+  const approval = detail?.approval || {};
+  const invoice = detail?.invoice || {};
+  const differenceFound =
+    validation?.differenceFound ??
+    normalizeDifferenceFound(
+      approval.booksSyncDifferenceFound ??
+        approval.booksSnapshotDifferenceFound ??
+        approval.differenceFound,
+      approval.differenceSummary || "",
+    );
+  const blockingReasons = Array.isArray(validation?.blockingReasons)
+    ? validation.blockingReasons.filter((reason) => normalizeText(reason))
+    : [];
+  const warningReasons = Array.isArray(validation?.warningReasons)
+    ? validation.warningReasons.filter((reason) => normalizeText(reason))
+    : [];
+  const canApprove =
+    typeof validation?.canApprove === "boolean"
+      ? validation.canApprove
+      : blockingReasons.length === 0;
+  const resultLabel = !validation
+    ? "Not Checked"
+    : !canApprove
+      ? "Blocked"
+      : warningReasons.length
+        ? "Manual Review"
+        : "Safe to Approve";
+
+  return {
+    approvalStatus: validation?.approvalStatus || approval.approvalStatus || "Unknown",
+    syncStatus: validation?.syncStatus || approval.syncStatus || "Unknown",
+    booksPaymentStatus:
+      validation?.booksPaymentStatus || invoice.paymentStatus || "Unknown",
+    differenceLabel:
+      differenceFound === true
+        ? "Difference Found"
+        : differenceFound === false
+          ? "No Difference"
+          : "Manual Review",
+    lastBooksSyncAt: validation?.lastBooksSyncAt || approval.lastBooksSyncAt || "",
+    lastComparedAt: validation?.lastComparedAt || approval.lastComparedAt || "",
+    resultLabel,
+    message:
+      validation?.message ||
+      "Checks whether this invoice is safe to approve based on Books refresh, payment status, and difference result.",
+    blockingReasons,
+    warningReasons,
+  };
+}
+
+function buildApprovalWarningMessage(validation) {
+  const lines = [
+    validation.message || "Approval has warnings that need confirmation.",
+  ];
+
+  if (validation.warningReasons?.length) {
+    lines.push("", "Warnings:");
+    validation.warningReasons.forEach((reason) => {
+      lines.push(`- ${reason}`);
+    });
+  }
+
+  lines.push("", "Continue with approval?");
+  return lines.join("\n");
 }
 
 function statusClass(label) {
@@ -427,6 +495,7 @@ function renderDetail() {
   const approval = detail.approval;
   const crm = detail.crmContext;
   const syncCheck = deriveSyncCheck(approval);
+  const guardrail = deriveGuardrailCheck(detail, state.guardrailCheck);
   const detailErrorMarkup = state.detailError
     ? `
       <div class="section-hint">
@@ -585,6 +654,78 @@ function renderDetail() {
       </article>
 
       <article class="detail-card action-card">
+        <div class="section-tag tag-creator">Approval Guardrails</div>
+        <h3>Approval Guardrails</h3>
+        <p>
+          Checks whether this invoice is safe to approve based on Books refresh, payment status, and difference result.
+        </p>
+        <div class="meta-grid">
+          <div class="mini-card">
+            <div class="mini-label">Approval Status</div>
+            <div class="mini-value">${escapeHtml(guardrail.approvalStatus)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Sync Status</div>
+            <div class="mini-value">${escapeHtml(guardrail.syncStatus)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Books Payment Status</div>
+            <div class="mini-value">${escapeHtml(guardrail.booksPaymentStatus)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Difference Found</div>
+            <div class="mini-value">${escapeHtml(guardrail.differenceLabel)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Last Books Sync At</div>
+            <div class="mini-value">${escapeHtml(
+              formatDate(guardrail.lastBooksSyncAt),
+            )}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Last Compared At</div>
+            <div class="mini-value">${escapeHtml(
+              formatDate(guardrail.lastComparedAt),
+            )}</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-label">Guardrail Result</div>
+          <div class="mini-value">${escapeHtml(guardrail.resultLabel)}</div>
+        </div>
+        ${
+          guardrail.blockingReasons.length
+            ? `
+              <div class="mini-card">
+                <div class="mini-label">Blocking Reasons</div>
+                <div class="mini-value">${guardrail.blockingReasons
+                  .map((reason) => escapeHtml(reason))
+                  .join("<br />")}</div>
+              </div>
+            `
+            : ""
+        }
+        ${
+          guardrail.warningReasons.length
+            ? `
+              <div class="mini-card">
+                <div class="mini-label">Warning Reasons</div>
+                <div class="mini-value">${guardrail.warningReasons
+                  .map((reason) => escapeHtml(reason))
+                  .join("<br />")}</div>
+              </div>
+            `
+            : ""
+        }
+        <div class="section-hint">${escapeHtml(guardrail.message)}</div>
+        <div class="action-buttons">
+          <button type="button" class="secondary-button" id="check-approval-safety-button">
+            Check Approval Safety
+          </button>
+        </div>
+      </article>
+
+      <article class="detail-card action-card">
         <div class="section-tag tag-creator">Creator Workflow</div>
         <h3>Approval controls</h3>
         <div class="action-grid">
@@ -732,6 +873,9 @@ function wireDetailActions() {
   const commentInput = document.getElementById("comment-input");
   const exceptionInput = document.getElementById("exception-input");
   const refreshButton = document.getElementById("refresh-detail-button");
+  const checkApprovalSafetyButton = document.getElementById(
+    "check-approval-safety-button",
+  );
   const approveButton = document.getElementById("approve-button");
   const rejectButton = document.getElementById("reject-button");
   const clarifyButton = document.getElementById("clarify-button");
@@ -753,6 +897,7 @@ function wireDetailActions() {
     renderDetail();
 
     try {
+      state.guardrailCheck = null;
       state.selectedDetail = await state.service.refreshBooksInvoiceSnapshot(
         state.selectedRecordId,
       );
@@ -777,12 +922,68 @@ function wireDetailActions() {
       renderDetail();
     }
   });
-  approveButton?.addEventListener("click", () =>
-    void runAction(
-      () => state.service.approveInvoice(state.selectedRecordId, getPayload("Approved")),
-      "Invoice approved successfully.",
-    ),
-  );
+  checkApprovalSafetyButton?.addEventListener("click", async () => {
+    if (!state.selectedRecordId || state.busyAction) {
+      return;
+    }
+
+    state.busyAction = true;
+
+    try {
+      state.guardrailCheck = await state.service.validateInvoiceApproval(
+        state.selectedRecordId,
+      );
+      renderDetail();
+      showToast(
+        state.guardrailCheck.canApprove
+          ? "Approval safety check completed."
+          : "Approval is currently blocked.",
+        state.guardrailCheck.canApprove ? "success" : "error",
+      );
+    } catch (error) {
+      showToast(getErrorMessage(error, "Failed to validate approval safety."), "error");
+    } finally {
+      state.busyAction = false;
+    }
+  });
+  approveButton?.addEventListener("click", async () => {
+    if (!state.selectedRecordId || state.busyAction) {
+      return;
+    }
+
+    try {
+      state.guardrailCheck = await state.service.validateInvoiceApproval(
+        state.selectedRecordId,
+      );
+      renderDetail();
+
+      if (!state.guardrailCheck.canApprove) {
+        const blockingMessage =
+          state.guardrailCheck.blockingReasons?.join(" ") ||
+          state.guardrailCheck.message ||
+          "Approval is blocked.";
+        showToast(blockingMessage, "error");
+        return;
+      }
+
+      if (state.guardrailCheck.warningReasons?.length) {
+        const confirmed = window.confirm(
+          buildApprovalWarningMessage(state.guardrailCheck),
+        );
+
+        if (!confirmed) {
+          return;
+        }
+      }
+
+      await runAction(
+        () => state.service.approveInvoice(state.selectedRecordId, getPayload("Approved")),
+        "Invoice approved successfully.",
+      );
+    } catch (error) {
+      showToast(getErrorMessage(error, "Failed to validate approval safety."), "error");
+    }
+  });
   rejectButton?.addEventListener("click", () =>
     void runAction(
       () => state.service.rejectInvoice(state.selectedRecordId, getPayload("Rejected")),
@@ -890,6 +1091,7 @@ async function loadDetailWithOptions(recordId, options = {}) {
   if (!recordId) {
     state.selectedDetail = null;
     state.detailError = null;
+    state.guardrailCheck = null;
     renderDetail();
     return;
   }
@@ -904,6 +1106,7 @@ async function loadDetailWithOptions(recordId, options = {}) {
 
   try {
     state.selectedDetail = await state.service.loadInvoiceDetail(recordId);
+    state.guardrailCheck = null;
   } catch (error) {
     state.detailError = error;
     if (!silent) {
@@ -975,6 +1178,7 @@ async function runAction(callback, successMessage = "Workflow action completed s
   try {
     const detail = await callback();
     state.selectedDetail = detail;
+    state.guardrailCheck = null;
     await loadInbox({ preserveSelectedRecordId: activeRecordId });
     state.selectedRecordId = activeRecordId;
     if (activeRecordId) {

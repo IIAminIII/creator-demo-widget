@@ -29,6 +29,26 @@ function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function toBooleanLike(value, fallback = null) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+
+    if (["true", "yes", "1", "found", "difference found"].includes(normalized)) {
+      return true;
+    }
+
+    if (["false", "no", "0", "none", "no difference"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return fallback;
+}
+
 function normalizeLineItem(record = {}) {
   return {
     id: String(record.id ?? record.ID ?? `LINE-${Date.now()}`),
@@ -159,8 +179,18 @@ function normalizeCreatorRecord(record) {
     decisionDate: getFirstString(record.Approval_Decision_Date),
     lastBooksSyncAt: getFirstString(record.Last_Books_Sync_At),
     lastCrmEnrichmentAt: getFirstString(record.Last_CRM_Enrichment_At),
-    lastComparedAt: getFirstString(record.Last_Compared_At, record.lastComparedAt),
-    differenceFound: record.Difference_Found ?? record.differenceFound ?? null,
+    lastComparedAt: getFirstString(
+      record.Last_Compared_At,
+      record.lastComparedAt,
+      record.lastBooksComparedAt,
+    ),
+    differenceFound: toBooleanLike(
+      record.Books_Sync_Difference_Found ??
+        record.Difference_Found ??
+        record.differenceFound ??
+        record.booksSyncDifferenceFound ??
+        record.booksSnapshotDifferenceFound,
+    ),
     differenceSummary: getFirstString(
       record.Difference_Summary,
       record.differenceSummary,
@@ -215,6 +245,127 @@ function addMockAudit(record, eventType, summary, actor) {
   return audit;
 }
 
+function buildGuardrailValidationFromSource(source = {}, fallback = {}) {
+  const approvalStatus = getFirstString(
+    source.approvalStatus,
+    source.Approval_Status,
+    fallback.approvalStatus,
+  );
+  const syncStatus = getFirstString(
+    source.syncStatus,
+    source.Sync_Status,
+    fallback.syncStatus,
+  );
+  const booksPaymentStatus = getFirstString(
+    source.booksPaymentStatus,
+    source.Books_Payment_Status,
+    source.paymentStatus,
+    fallback.booksPaymentStatus,
+  );
+  const differenceFound = toBooleanLike(
+    source.booksSyncDifferenceFound ??
+      source.booksSnapshotDifferenceFound ??
+      source.differenceFound ??
+      source.Difference_Found ??
+      source.Books_Sync_Difference_Found,
+    fallback.differenceFound ?? null,
+  );
+  const lastBooksSyncAt = getFirstString(
+    source.lastBooksSyncAt,
+    source.Last_Books_Sync_At,
+    fallback.lastBooksSyncAt,
+  );
+  const lastComparedAt = getFirstString(
+    source.lastComparedAt,
+    source.Last_Compared_At,
+    source.lastBooksComparedAt,
+    fallback.lastComparedAt,
+  );
+  const blockingReasons = Array.isArray(source.blockingReasons)
+    ? source.blockingReasons.filter((reason) => getFirstString(reason))
+    : [];
+  const warningReasons = Array.isArray(source.warningReasons)
+    ? source.warningReasons.filter((reason) => getFirstString(reason))
+    : [];
+
+  if (!blockingReasons.length && !warningReasons.length) {
+    if (!lastBooksSyncAt) {
+      blockingReasons.push("Refresh from Books before approving this invoice.");
+    }
+
+    if (!lastComparedAt) {
+      warningReasons.push("Comparison timestamp is missing. Review the latest Books snapshot.");
+    }
+
+    if (differenceFound === true) {
+      blockingReasons.push("Books comparison found differences that must be reviewed first.");
+    }
+
+    const normalizedPayment = booksPaymentStatus.toLowerCase();
+    if (normalizedPayment.includes("paid")) {
+      warningReasons.push("Invoice already shows a paid or partially paid status in Books.");
+    }
+
+    const normalizedSync = syncStatus.toLowerCase();
+    if (normalizedSync.includes("failed")) {
+      blockingReasons.push("The latest Books sync failed. Refresh and compare again before approving.");
+    } else if (
+      normalizedSync.includes("manual") ||
+      normalizedSync.includes("warning")
+    ) {
+      warningReasons.push("Books sync status suggests manual review is still recommended.");
+    }
+
+    if (lastBooksSyncAt) {
+      const syncedAt = new Date(lastBooksSyncAt);
+
+      if (!Number.isNaN(syncedAt.getTime())) {
+        const ageMs = Date.now() - syncedAt.getTime();
+        if (ageMs > 24 * 60 * 60 * 1000) {
+          warningReasons.push("Books snapshot is older than 24 hours.");
+        }
+      }
+    }
+  }
+
+  const canApprove =
+    typeof source.canApprove === "boolean"
+      ? source.canApprove
+      : blockingReasons.length === 0;
+  const severity =
+    getFirstString(source.severity) ||
+    (canApprove
+      ? warningReasons.length
+        ? "warning"
+        : "success"
+      : "error");
+  const message =
+    getFirstString(source.message) ||
+    (canApprove
+      ? warningReasons.length
+        ? "Approval can continue with reviewer confirmation."
+        : "Invoice is safe to approve."
+      : "Approval is blocked until the listed issues are resolved.");
+
+  return {
+    ok: source.ok !== false,
+    canApprove,
+    severity,
+    message,
+    blockingReasons,
+    warningReasons,
+    approvalRecordId: String(
+      source.approvalRecordId ?? fallback.approvalRecordId ?? "",
+    ),
+    approvalStatus,
+    syncStatus,
+    booksPaymentStatus,
+    differenceFound,
+    lastBooksSyncAt,
+    lastComparedAt,
+  };
+}
+
 function createMockService() {
   return {
     mode: "mock",
@@ -237,6 +388,27 @@ function createMockService() {
       }
 
       return clone(record);
+    },
+
+    async validateInvoiceApproval(recordId) {
+      const record = mockStore.find((item) => item.approvalRecordId === recordId);
+
+      if (!record) {
+        throw new Error("Approval record not found.");
+      }
+
+      return buildGuardrailValidationFromSource(
+        {
+          approvalRecordId: record.approvalRecordId,
+          approvalStatus: record.approvalStatus,
+          syncStatus: record.syncStatus,
+          booksPaymentStatus: record.paymentStatus,
+          differenceFound: record.differenceFound,
+          lastBooksSyncAt: record.lastBooksSyncAt,
+          lastComparedAt: record.lastComparedAt,
+        },
+        { approvalRecordId: recordId },
+      );
     },
 
     async refreshInvoice(invoiceId) {
@@ -419,6 +591,36 @@ function createCreatorService(api, config) {
         mode: "refresh",
       });
       return response?.data ?? response;
+    },
+
+    async validateInvoiceApproval(recordId) {
+      if (config.validateInvoiceApprovalFunctionName) {
+        const response = await tryInvokeCreatorFunction(
+          api,
+          config.validateInvoiceApprovalFunctionName,
+          { approvalRecordId: recordId },
+        );
+        const result = response?.data?.result ?? response?.result ?? response?.data ?? response;
+
+        return buildGuardrailValidationFromSource(result, {
+          approvalRecordId: recordId,
+        });
+      }
+
+      const detail = await this.loadInvoiceDetail(recordId);
+
+      return buildGuardrailValidationFromSource(
+        {
+          approvalRecordId: detail.approvalRecordId,
+          approvalStatus: detail.approvalStatus,
+          syncStatus: detail.syncStatus,
+          booksPaymentStatus: detail.paymentStatus,
+          differenceFound: detail.differenceFound,
+          lastBooksSyncAt: detail.lastBooksSyncAt,
+          lastComparedAt: detail.lastComparedAt,
+        },
+        { approvalRecordId: recordId },
+      );
     },
 
     async approveInvoice(recordId, payload) {
@@ -633,6 +835,11 @@ export function resolveInvoiceApprovalConfig(widgetParams = {}, initData = {}) {
     booksListFunctionName: getFirstString(widgetParams.booksListFunctionName, "listBooksInvoicesForApproval"),
     booksDetailFunctionName: getFirstString(widgetParams.booksDetailFunctionName, "getBooksInvoiceDetails"),
     crmContextFunctionName: getFirstString(widgetParams.crmContextFunctionName, "getCrmContextForInvoice"),
+    validateInvoiceApprovalFunctionName: getFirstString(
+      widgetParams.validateInvoiceApprovalFunctionName,
+      widgetParams.validateApprovalFunctionName,
+      "validateInvoiceApproval",
+    ),
     approvalActionFunctionName: getFirstString(widgetParams.approvalActionFunctionName, "approveInvoice"),
     inboxDefaultStatusFilter: getFirstString(widgetParams.inboxDefaultStatusFilter, "All"),
     autoRefreshIntervalMs:

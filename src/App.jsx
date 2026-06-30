@@ -106,6 +106,7 @@ export default function App() {
   const [actionLoading, setActionLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [guardrailCheck, setGuardrailCheck] = useState(null);
 
   async function loadInbox(nextFilters = filters, options = {}) {
     const silent = options.silent === true;
@@ -142,6 +143,7 @@ export default function App() {
   async function loadDetail(recordId, options = {}) {
     if (!recordId) {
       setSelectedDetail(null);
+      setGuardrailCheck(null);
       return;
     }
 
@@ -155,6 +157,7 @@ export default function App() {
     try {
       const detail = await service.loadInvoiceDetail(recordId);
       setSelectedDetail(detail);
+      setGuardrailCheck(null);
     } catch (error) {
       if (!silent) {
         setErrorMessage(getErrorMessage(error, "Failed to load the invoice detail."));
@@ -219,6 +222,7 @@ export default function App() {
       const detail = await action();
       const refreshedInboxItem = toInboxItemFromDetail(detail);
       setSelectedDetail(detail);
+      setGuardrailCheck(null);
       if (refreshedInboxItem?.approvalRecordId) {
         setInboxItems((current) =>
           current.map((item) =>
@@ -241,6 +245,122 @@ export default function App() {
       setSuccessMessage("Workflow action completed successfully.");
     } catch (error) {
       setErrorMessage(getErrorMessage(error, "The workflow action could not be completed."));
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  function buildApprovalWarningMessage(validation) {
+    const lines = [
+      validation.message || "Approval has warnings that need confirmation.",
+    ];
+
+    if (validation.warningReasons?.length) {
+      lines.push("", "Warnings:");
+      validation.warningReasons.forEach((reason) => {
+        lines.push(`- ${reason}`);
+      });
+    }
+
+    lines.push("", "Continue with approval?");
+    return lines.join("\n");
+  }
+
+  async function runApprovalSafetyCheck(options = {}) {
+    if (!selectedRecordId) {
+      return null;
+    }
+
+    const silent = options.silent === true;
+
+    if (!silent) {
+      setActionLoading(true);
+      setErrorMessage("");
+      setSuccessMessage("");
+    }
+
+    try {
+      const validation = await service.validateInvoiceApproval(selectedRecordId);
+      setGuardrailCheck(validation);
+
+      if (!silent) {
+        setSuccessMessage(
+          validation.canApprove
+            ? "Approval safety check completed successfully."
+            : "Approval is currently blocked.",
+        );
+      }
+
+      return validation;
+    } catch (error) {
+      if (!silent) {
+        setErrorMessage(getErrorMessage(error, "Failed to validate invoice approval."));
+      }
+      throw error;
+    } finally {
+      if (!silent) {
+        setActionLoading(false);
+      }
+    }
+  }
+
+  async function runApproveAction(payload) {
+    setActionLoading(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const validation = await service.validateInvoiceApproval(selectedRecordId);
+      setGuardrailCheck(validation);
+
+      if (!validation.canApprove) {
+        const blockingMessage =
+          validation.blockingReasons?.join(" ") ||
+          validation.message ||
+          "Approval is blocked.";
+        setErrorMessage(blockingMessage);
+        return;
+      }
+
+      if (validation.warningReasons?.length) {
+        const confirmed = window.confirm(buildApprovalWarningMessage(validation));
+
+        if (!confirmed) {
+          setSuccessMessage("Approval cancelled after warning review.");
+          return;
+        }
+      }
+
+      const detail = await service.approveInvoice(selectedRecordId, payload);
+      const refreshedInboxItem = toInboxItemFromDetail(detail);
+      setSelectedDetail(detail);
+      setGuardrailCheck(null);
+
+      if (refreshedInboxItem?.approvalRecordId) {
+        setInboxItems((current) =>
+          current.map((item) =>
+            item.approvalRecordId === refreshedInboxItem.approvalRecordId
+              ? { ...item, ...refreshedInboxItem }
+              : item,
+          ),
+        );
+      }
+
+      await loadInbox();
+
+      if (refreshedInboxItem?.approvalRecordId) {
+        setInboxItems((current) =>
+          current.map((item) =>
+            item.approvalRecordId === refreshedInboxItem.approvalRecordId
+              ? { ...item, ...refreshedInboxItem }
+              : item,
+          ),
+        );
+      }
+
+      setSuccessMessage("Invoice approved successfully.");
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, "The approval action could not be completed."));
     } finally {
       setActionLoading(false);
     }
@@ -380,6 +500,7 @@ export default function App() {
           detail={selectedDetail}
           loading={detailLoading}
           actionLoading={actionLoading}
+          guardrailCheck={guardrailCheck}
           onRefresh={() =>
             runAction(async () => {
               const refreshed = await service.refreshInvoice(selectedDetail.booksInvoiceId);
@@ -389,9 +510,8 @@ export default function App() {
               return refreshed;
             })
           }
-          onApprove={(payload) =>
-            runAction(() => service.approveInvoice(selectedRecordId, payload))
-          }
+          onCheckApprovalSafety={() => runApprovalSafetyCheck()}
+          onApprove={(payload) => runApproveAction(payload)}
           onReject={(payload) =>
             runAction(() => service.rejectInvoice(selectedRecordId, payload))
           }
@@ -422,6 +542,7 @@ export default function App() {
                 "listBooksInvoicesForApproval",
                 "getBooksInvoiceDetails",
                 "getCrmContextForInvoice",
+                "validateInvoiceApproval",
                 "approveInvoice",
                 "rejectInvoice",
                 "requestClarification",

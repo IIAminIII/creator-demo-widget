@@ -181,6 +181,26 @@ function createMockService() {
 
       return deepClone(record);
     },
+    async validateInvoiceApproval(recordId) {
+      const record = state.find((entry) => entry.approvalRecordId === recordId);
+
+      if (!record) {
+        throw new Error("The selected invoice approval record was not found.");
+      }
+
+      return buildGuardrailValidationFromSource(
+        {
+          approvalRecordId: record.approvalRecordId,
+          approvalStatus: record.approval.approvalStatus,
+          syncStatus: record.approval.syncStatus,
+          booksPaymentStatus: record.invoice.paymentStatus,
+          differenceFound: record.approval.differenceFound,
+          lastBooksSyncAt: record.approval.lastBooksSyncAt,
+          lastComparedAt: record.approval.lastComparedAt,
+        },
+        { approvalRecordId: recordId },
+      );
+    },
     async approveInvoice(recordId, payload) {
       validateActionPayload("approve", payload);
       const index = findRecordIndex(state, recordId);
@@ -363,6 +383,24 @@ function toOptionalNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function toBooleanLike(value, fallback = null) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "yes", "1", "found", "difference found"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "no", "0", "none", "no difference"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return fallback;
+}
+
 function isSuccessfulResponse(response) {
   return (
     response?.ok === true ||
@@ -484,13 +522,19 @@ function mapApprovalRecord(record) {
       getNestedValue(record, ["Last_CRM_Enrichment_At", "lastCrmEnrichmentAt"], ""),
     ),
     lastComparedAt: String(
-      getNestedValue(record, ["Last_Compared_At", "lastComparedAt"], ""),
+      getNestedValue(record, ["Last_Compared_At", "lastComparedAt", "lastBooksComparedAt"], ""),
     ),
-    differenceFound: getNestedValue(
+    differenceFound: toBooleanLike(getNestedValue(
       record,
-      ["Difference_Found", "differenceFound"],
+      [
+        "Books_Sync_Difference_Found",
+        "Difference_Found",
+        "differenceFound",
+        "booksSyncDifferenceFound",
+        "booksSnapshotDifferenceFound",
+      ],
       null,
-    ),
+    )),
     differenceSummary: String(
       getNestedValue(record, ["Difference_Summary", "differenceSummary"], ""),
     ),
@@ -756,6 +800,134 @@ function parseCustomApiReference(apiReference) {
       appLinkName: "",
     };
   }
+}
+
+function buildGuardrailValidationFromSource(source = {}, fallback = {}) {
+  const approvalStatus = String(
+    getNestedValue(source, ["approvalStatus", "Approval_Status"], fallback.approvalStatus || ""),
+  );
+  const syncStatus = String(
+    getNestedValue(source, ["syncStatus", "Sync_Status"], fallback.syncStatus || ""),
+  );
+  const booksPaymentStatus = String(
+    getNestedValue(
+      source,
+      ["booksPaymentStatus", "paymentStatus", "Books_Payment_Status"],
+      fallback.booksPaymentStatus || "",
+    ),
+  );
+  const differenceFound = toBooleanLike(
+    getNestedValue(
+      source,
+      [
+        "differenceFound",
+        "booksSyncDifferenceFound",
+        "Books_Sync_Difference_Found",
+        "booksSnapshotDifferenceFound",
+      ],
+      fallback.differenceFound,
+    ),
+    fallback.differenceFound ?? null,
+  );
+  const lastBooksSyncAt = String(
+    getNestedValue(
+      source,
+      ["lastBooksSyncAt", "Last_Books_Sync_At"],
+      fallback.lastBooksSyncAt || "",
+    ),
+  );
+  const lastComparedAt = String(
+    getNestedValue(
+      source,
+      ["lastComparedAt", "Last_Compared_At", "lastBooksComparedAt"],
+      fallback.lastComparedAt || "",
+    ),
+  );
+  const blockingReasons = Array.isArray(source.blockingReasons)
+    ? source.blockingReasons.filter((reason) => normalizeText(reason))
+    : [];
+  const warningReasons = Array.isArray(source.warningReasons)
+    ? source.warningReasons.filter((reason) => normalizeText(reason))
+    : [];
+  const paymentStatusNormalized = normalizeText(booksPaymentStatus).toLowerCase();
+  const syncStatusNormalized = normalizeText(syncStatus).toLowerCase();
+  const syncAgeMs = lastBooksSyncAt ? Date.now() - new Date(lastBooksSyncAt).getTime() : null;
+
+  if (!blockingReasons.length && !warningReasons.length) {
+    if (!lastBooksSyncAt) {
+      blockingReasons.push("Books snapshot has not been refreshed yet.");
+    } else if (Number.isFinite(syncAgeMs) && syncAgeMs > 24 * 60 * 60 * 1000) {
+      warningReasons.push("Books snapshot is older than 24 hours.");
+    }
+
+    if (!lastComparedAt) {
+      warningReasons.push(
+        "Approval snapshot has not been compared against the latest Books invoice.",
+      );
+    }
+
+    if (differenceFound === true) {
+      blockingReasons.push(
+        "A difference was found between Creator and the latest Books invoice.",
+      );
+    }
+
+    if (paymentStatusNormalized.includes("paid")) {
+      warningReasons.push("This invoice already shows payment activity in Zoho Books.");
+    }
+
+    if (syncStatusNormalized.includes("failed")) {
+      blockingReasons.push(
+        "Sync status is failed. Refresh and review the invoice before approving.",
+      );
+    } else if (
+      syncStatusNormalized.includes("manual") ||
+      syncStatusNormalized.includes("warning")
+    ) {
+      warningReasons.push("Sync status indicates manual review is still recommended.");
+    }
+  }
+
+  const canApprove =
+    typeof source.canApprove === "boolean"
+      ? source.canApprove
+      : blockingReasons.length === 0;
+  const severity =
+    normalizeText(source.severity) ||
+    (canApprove
+      ? warningReasons.length
+        ? "warning"
+        : "success"
+      : "error");
+  const message =
+    normalizeText(source.message) ||
+    (canApprove
+      ? warningReasons.length
+        ? "Approval can continue, but reviewer confirmation is recommended."
+        : "Invoice is safe to approve based on current guardrail checks."
+      : "Approval is blocked until the listed issues are resolved.");
+
+  return {
+    ok: source.ok !== false,
+    canApprove,
+    severity,
+    message,
+    blockingReasons,
+    warningReasons,
+    approvalRecordId: String(
+      getNestedValue(
+        source,
+        ["approvalRecordId", "Approval_Request_ID", "ID", "id"],
+        fallback.approvalRecordId || "",
+      ),
+    ),
+    approvalStatus,
+    syncStatus,
+    booksPaymentStatus,
+    differenceFound,
+    lastBooksSyncAt,
+    lastComparedAt,
+  };
 }
 
 function isCustomApiUrl(apiReference) {
@@ -1186,6 +1358,41 @@ function createCreatorService(config, creator, widgetContext) {
       }
 
       return this.loadInvoiceDetail(recordId);
+    },
+
+    async validateInvoiceApproval(recordId) {
+      if (customApis.validateInvoiceApproval) {
+        const response = await invokeCreatorCustomApi(
+          customApis.validateInvoiceApproval,
+          { approvalRecordId: recordId },
+        );
+        const normalized = normalizeApiEnvelope(response);
+        const result =
+          normalized?.result || normalized?.data?.result || normalized?.data || normalized;
+
+        if (hasExplicitFailure(result)) {
+          throw new Error(result?.message || "Failed to validate approval safety.");
+        }
+
+        return buildGuardrailValidationFromSource(result, {
+          approvalRecordId: recordId,
+        });
+      }
+
+      const detail = await this.loadInvoiceDetail(recordId);
+
+      return buildGuardrailValidationFromSource(
+        {
+          approvalRecordId: detail.approvalRecordId,
+          approvalStatus: detail.approval?.approvalStatus,
+          syncStatus: detail.approval?.syncStatus,
+          booksPaymentStatus: detail.invoice?.paymentStatus,
+          differenceFound: detail.approval?.differenceFound,
+          lastBooksSyncAt: detail.approval?.lastBooksSyncAt,
+          lastComparedAt: detail.approval?.lastComparedAt,
+        },
+        { approvalRecordId: recordId },
+      );
     },
 
     async approveInvoice(recordId, payload) {
