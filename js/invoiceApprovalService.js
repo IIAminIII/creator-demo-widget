@@ -439,12 +439,16 @@ function mapApprovalRecord(record) {
         "Not available",
       ),
     ),
-    invoiceTotal: toNumber(getNestedValue(record, ["Invoice_Total"], 0)),
-    currencyCode: String(getNestedValue(record, ["Currency_Code"], "USD")),
-    dueDate: String(getNestedValue(record, ["Due_Date"], "")),
-    invoiceDate: String(getNestedValue(record, ["Invoice_Date"], "")),
+    invoiceTotal: toNumber(
+      getNestedValue(record, ["Invoice_Total", "invoiceTotal", "total"], 0),
+    ),
+    currencyCode: String(
+      getNestedValue(record, ["Currency_Code", "currencyCode"], "USD"),
+    ),
+    dueDate: String(getNestedValue(record, ["Due_Date", "dueDate"], "")),
+    invoiceDate: String(getNestedValue(record, ["Invoice_Date", "invoiceDate"], "")),
     booksStatus: String(
-      getNestedValue(record, ["Books_Invoice_Status", "booksStatus"], "Unknown"),
+      getNestedValue(record, ["Books_Invoice_Status", "booksStatus", "status"], "Unknown"),
     ),
     paymentStatus: String(
       getNestedValue(record, ["Books_Payment_Status", "paymentStatus"], "Unknown"),
