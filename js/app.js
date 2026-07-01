@@ -244,6 +244,62 @@ function deriveReviewerDecisionSummary(detail) {
   };
 }
 
+function deriveApprovalChecklist(guardrail) {
+  const syncStatus = normalizeText(guardrail.syncStatus).toLowerCase();
+  const paymentStatus = normalizeText(guardrail.booksPaymentStatus).toLowerCase();
+  const hasFreshSync = Boolean(guardrail.lastBooksSyncAt);
+  const hasCompared = Boolean(guardrail.lastComparedAt);
+  const noDifference = guardrail.differenceLabel === "No Difference";
+  const syncFailed = syncStatus.includes("failed");
+  const manualReview = syncStatus.includes("manual") || syncStatus.includes("warning");
+  const paymentNeedsReview = paymentStatus.includes("paid");
+
+  return [
+    {
+      label: "Books snapshot refreshed",
+      checked: hasFreshSync,
+      tone: hasFreshSync ? "done" : "missing",
+      helper: hasFreshSync
+        ? `Last sync ${formatDate(guardrail.lastBooksSyncAt)}`
+        : "Refresh from Books before approval.",
+    },
+    {
+      label: "Snapshot compared with Creator record",
+      checked: hasCompared,
+      tone: hasCompared ? "done" : "missing",
+      helper: hasCompared
+        ? `Compared ${formatDate(guardrail.lastComparedAt)}`
+        : "Comparison timestamp is missing.",
+    },
+    {
+      label: "No Books vs Creator difference found",
+      checked: noDifference,
+      tone: noDifference ? "done" : "missing",
+      helper: noDifference
+        ? "No reconciliation difference detected."
+        : "A difference still needs review before approval.",
+    },
+    {
+      label: "Books refresh status is healthy",
+      checked: !syncFailed,
+      tone: syncFailed ? "missing" : manualReview ? "warning" : "done",
+      helper: syncFailed
+        ? "Latest Books refresh failed."
+        : manualReview
+          ? "Manual review is still recommended."
+          : "Sync status looks healthy.",
+    },
+    {
+      label: "Payment status is safe for approval",
+      checked: !paymentNeedsReview,
+      tone: paymentNeedsReview ? "warning" : "done",
+      helper: paymentNeedsReview
+        ? "Books already shows paid or partial payment activity."
+        : "No payment warning detected in Books.",
+    },
+  ];
+}
+
 function statusClass(label) {
   return `status-${String(label).toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
 }
@@ -629,6 +685,7 @@ function renderDetail() {
   const syncCheck = deriveSyncCheck(approval);
   const guardrail = deriveGuardrailCheck(detail, state.guardrailCheck);
   const reviewerDecision = deriveReviewerDecisionSummary(detail);
+  const approvalChecklist = deriveApprovalChecklist(guardrail);
   const detailErrorMarkup = state.detailError
     ? `
       <div class="section-hint">
@@ -871,6 +928,24 @@ function renderDetail() {
         <div class="mini-card">
           <div class="mini-label">Guardrail Result</div>
           <div class="mini-value">${escapeHtml(guardrail.resultLabel)}</div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-label">Approval Checklist</div>
+          <div class="checklist">
+            ${approvalChecklist
+              .map(
+                (item) => `
+                  <div class="checklist-item ${item.tone}">
+                    <div class="checklist-mark">${item.checked ? "✓" : item.tone === "warning" ? "!" : "○"}</div>
+                    <div class="checklist-copy">
+                      <div class="checklist-label">${escapeHtml(item.label)}</div>
+                      <div class="checklist-helper">${escapeHtml(item.helper)}</div>
+                    </div>
+                  </div>
+                `,
+              )
+              .join("")}
+          </div>
         </div>
         ${
           guardrail.blockingReasons.length

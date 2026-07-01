@@ -515,6 +515,63 @@ button {
   line-height: 1.4;
 }
 
+.checklist {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.checklist-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.checklist-item.done .checklist-mark {
+  border-color: rgba(31, 157, 103, 0.25);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.checklist-item.warning .checklist-mark {
+  border-color: rgba(197, 133, 18, 0.24);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.checklist-item.missing .checklist-mark {
+  border-color: rgba(208, 75, 75, 0.24);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.checklist-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.checklist-helper {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .snapshot-table {
   width: 100%;
   border-collapse: collapse;

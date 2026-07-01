@@ -207,6 +207,62 @@ function deriveReviewerDecisionSummary(detail) {
   };
 }
 
+function deriveApprovalChecklist(guardrail) {
+  const syncStatus = (guardrail?.syncStatus || "").trim().toLowerCase();
+  const paymentStatus = (guardrail?.booksPaymentStatus || "").trim().toLowerCase();
+  const hasFreshSync = Boolean(guardrail?.lastBooksSyncAt);
+  const hasCompared = Boolean(guardrail?.lastComparedAt);
+  const noDifference = guardrail?.differenceFound === "No Difference";
+  const syncFailed = syncStatus.includes("failed");
+  const manualReview = syncStatus.includes("manual") || syncStatus.includes("warning");
+  const paymentNeedsReview = paymentStatus.includes("paid");
+
+  return [
+    {
+      label: "Books snapshot refreshed",
+      checked: hasFreshSync,
+      tone: hasFreshSync ? "done" : "missing",
+      helper: hasFreshSync
+        ? `Last sync ${formatDateTime(guardrail.lastBooksSyncAt)}`
+        : "Refresh from Books before approval.",
+    },
+    {
+      label: "Snapshot compared with Creator record",
+      checked: hasCompared,
+      tone: hasCompared ? "done" : "missing",
+      helper: hasCompared
+        ? `Compared ${formatDateTime(guardrail.lastComparedAt)}`
+        : "Comparison timestamp is missing.",
+    },
+    {
+      label: "No Books vs Creator difference found",
+      checked: noDifference,
+      tone: noDifference ? "done" : "missing",
+      helper: noDifference
+        ? "No reconciliation difference detected."
+        : "A difference still needs review before approval.",
+    },
+    {
+      label: "Books refresh status is healthy",
+      checked: !syncFailed,
+      tone: syncFailed ? "missing" : manualReview ? "warning" : "done",
+      helper: syncFailed
+        ? "Latest Books refresh failed."
+        : manualReview
+          ? "Manual review is still recommended."
+          : "Sync status looks healthy.",
+    },
+    {
+      label: "Payment status is safe for approval",
+      checked: !paymentNeedsReview,
+      tone: paymentNeedsReview ? "warning" : "done",
+      helper: paymentNeedsReview
+        ? "Books already shows paid or partial payment activity."
+        : "No payment warning detected in Books.",
+    },
+  ];
+}
+
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 function isStaleSyncAt(syncAtString) {
@@ -254,6 +310,9 @@ export default function InvoiceDetail({
   const approvalGuardrail = detail
     ? deriveApprovalGuardrail(detail, guardrailCheck)
     : null;
+  const approvalChecklist = detail
+    ? deriveApprovalChecklist(approvalGuardrail)
+    : [];
   const reviewerDecisionSummary = detail
     ? deriveReviewerDecisionSummary(detail)
     : null;
@@ -555,6 +614,30 @@ export default function InvoiceDetail({
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Guardrail Result</p>
                   <p className="mt-2 text-sm font-semibold text-slate-900">{approvalGuardrail.result}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Approval Checklist</p>
+                  <div className="mt-3 space-y-3">
+                    {approvalChecklist.map((item) => (
+                      <div key={item.label} className="grid grid-cols-[24px_1fr] gap-3">
+                        <div
+                          className={`flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-black ${
+                            item.tone === "done"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : item.tone === "warning"
+                                ? "border-amber-200 bg-amber-50 text-amber-700"
+                                : "border-rose-200 bg-rose-50 text-rose-700"
+                          }`}
+                        >
+                          {item.checked ? "✓" : item.tone === "warning" ? "!" : "○"}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{item.label}</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">{item.helper}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 {approvalGuardrail.blockingReasons.length ? (
                   <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4">
