@@ -213,6 +213,7 @@ function deriveApprovalChecklist(guardrail) {
   const hasFreshSync = Boolean(guardrail?.lastBooksSyncAt);
   const hasCompared = Boolean(guardrail?.lastComparedAt);
   const noDifference = guardrail?.differenceFound === "No Difference";
+  const differenceFound = guardrail?.differenceFound === "Difference Found";
   const syncFailed = syncStatus.includes("failed");
   const manualReview = syncStatus.includes("manual") || syncStatus.includes("warning");
   const paymentNeedsReview = paymentStatus.includes("paid");
@@ -235,12 +236,17 @@ function deriveApprovalChecklist(guardrail) {
         : "Comparison timestamp is missing.",
     },
     {
-      label: "No Books vs Creator difference found",
+      label: noDifference
+        ? "Books and Creator records match"
+        : "Books vs Creator difference reviewed",
       checked: noDifference,
-      tone: noDifference ? "done" : "missing",
+      tone: noDifference ? "done" : differenceFound ? "missing" : "warning",
       helper: noDifference
-        ? "No reconciliation difference detected."
-        : "A difference still needs review before approval.",
+        ? "No reconciliation difference was detected."
+        : differenceFound
+          ? guardrail?.message ||
+            "A mismatch was found between the latest Books invoice and the Creator approval snapshot. Refresh, compare the changed fields, and update the workflow decision only after review."
+          : "Comparison result still needs reviewer confirmation.",
     },
     {
       label: "Books refresh status is healthy",
