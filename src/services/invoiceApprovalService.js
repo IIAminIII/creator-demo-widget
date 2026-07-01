@@ -177,6 +177,9 @@ function normalizeCreatorRecord(record) {
     exceptionReason: getFirstString(record.Exception_Reason),
     reviewerNotes: getFirstString(record.Reviewer_Notes),
     decisionDate: getFirstString(record.Approval_Decision_Date),
+    lastActionBy: getFirstString(record.Last_Action_By, record.lastActionBy),
+    lastActionDate: getFirstString(record.Last_Action_Date, record.lastActionDate),
+    lastEventType: getFirstString(record.Last_Event_Type, record.lastEventType),
     lastBooksSyncAt: getFirstString(record.Last_Books_Sync_At),
     lastCrmEnrichmentAt: getFirstString(record.Last_CRM_Enrichment_At),
     lastComparedAt: getFirstString(
@@ -212,10 +215,20 @@ function normalizeComment(record) {
 function normalizeAudit(record) {
   return {
     id: String(getRecordId(record) ?? crypto.randomUUID?.() ?? Math.random()),
-    eventType: getFirstString(record.Event_Type, "Event"),
+    eventType: getFirstString(record.Event_Type, record.eventType, "Event"),
     summary: getFirstString(record.Event_Summary, record.Summary, "Activity logged."),
     actor: getFirstString(record.Actor, record.Created_By, "System"),
     createdAt: getFirstString(record.Created_At, record.Added_Time, new Date().toISOString()),
+  };
+}
+
+function getLatestAuditSummary(audit = []) {
+  const latest = Array.isArray(audit) && audit.length ? audit[0] : null;
+
+  return {
+    lastActionBy: latest?.actor || "",
+    lastActionDate: latest?.createdAt || "",
+    lastEventType: latest?.eventType || "",
   };
 }
 
@@ -242,6 +255,9 @@ function addMockAudit(record, eventType, summary, actor) {
   };
 
   record.audit.unshift(audit);
+  record.lastActionBy = audit.actor;
+  record.lastActionDate = audit.createdAt;
+  record.lastEventType = audit.eventType;
   return audit;
 }
 
@@ -419,7 +435,7 @@ function createMockService() {
       }
 
       record.lastBooksSyncAt = new Date().toISOString();
-      addMockAudit(record, "Books refresh", "Invoice snapshot refreshed from the local preview source.", "System");
+      addMockAudit(record, "Books Snapshot Refreshed", "Invoice snapshot refreshed from the local preview source.", "System");
 
       return clone(record);
     },
@@ -473,7 +489,7 @@ function createMockService() {
       record.reviewerNotes = payload.comment || record.reviewerNotes;
       record.assignedReviewer = payload.reviewer || record.assignedReviewer;
       addMockComment(record, { ...payload, type: "Clarification" });
-      addMockAudit(record, "Needs Clarification", `Clarification requested: ${payload.exceptionReason || "No reason provided"}.`, payload.reviewer || "Reviewer");
+      addMockAudit(record, "Clarification Requested", `Clarification requested: ${payload.exceptionReason || "No reason provided"}.`, payload.reviewer || "Reviewer");
 
       return clone(record);
     },
@@ -486,7 +502,7 @@ function createMockService() {
       }
 
       addMockComment(record, payload);
-      addMockAudit(record, "Comment added", "Reviewer added a comment.", payload.reviewer || "Reviewer");
+      addMockAudit(record, "Comment Added", "Reviewer added a comment.", payload.reviewer || "Reviewer");
 
       return clone(record.comments);
     },
@@ -565,6 +581,7 @@ function createCreatorService(api, config) {
       }
 
       const invoice = normalizeCreatorRecord(record);
+      const lastAuditSummary = getLatestAuditSummary(audit);
 
       return {
         ...invoice,
@@ -572,6 +589,9 @@ function createCreatorService(api, config) {
         differenceFound: invoice.differenceFound,
         differenceSummary: invoice.differenceSummary,
         syncStatus: invoice.syncStatus,
+        lastActionBy: invoice.lastActionBy || lastAuditSummary.lastActionBy,
+        lastActionDate: invoice.lastActionDate || lastAuditSummary.lastActionDate,
+        lastEventType: invoice.lastEventType || lastAuditSummary.lastEventType,
         lineItems: extractLineItems(record),
         crmContext: {
           accountName: invoice.crmAccountName,

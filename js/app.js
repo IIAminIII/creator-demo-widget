@@ -194,6 +194,56 @@ function deriveGuardrailCheck(detail, validation = null) {
   };
 }
 
+function getAuditEventPresentation(eventType = "") {
+  const normalized = normalizeText(eventType).toLowerCase();
+
+  if (normalized === "approved") {
+    return { label: "Invoice Approved", badgeClass: "audit-success" };
+  }
+
+  if (normalized === "rejected") {
+    return { label: "Invoice Rejected", badgeClass: "audit-danger" };
+  }
+
+  if (
+    normalized === "clarification requested" ||
+    normalized === "needs clarification"
+  ) {
+    return { label: "Clarification Requested", badgeClass: "audit-warning" };
+  }
+
+  if (normalized === "comment added") {
+    return { label: "Comment Added", badgeClass: "audit-neutral" };
+  }
+
+  if (normalized === "books snapshot refreshed" || normalized === "books refresh") {
+    return { label: "Books Snapshot Refreshed", badgeClass: "audit-info" };
+  }
+
+  if (normalized === "books sync failed" || normalized === "books refresh failed") {
+    return { label: "Books Refresh Failed", badgeClass: "audit-danger" };
+  }
+
+  return { label: eventType || "Activity", badgeClass: "audit-neutral" };
+}
+
+function deriveReviewerDecisionSummary(detail) {
+  const approval = detail?.approval || {};
+  const latestAudit = Array.isArray(detail?.audit) && detail.audit.length
+    ? detail.audit[0]
+    : null;
+
+  return {
+    approvalStatus: approval.approvalStatus || "Unknown",
+    reviewerNotes: approval.reviewerNotes || "No reviewer notes yet.",
+    approvalDecisionDate: approval.approvalDecisionDate || "",
+    exceptionReason: approval.exceptionReason || "None",
+    lastActionBy: approval.lastActionBy || latestAudit?.actor || "Not available",
+    lastActionDate: approval.lastActionDate || latestAudit?.eventDate || "",
+    lastEventType: approval.lastEventType || latestAudit?.eventType || "Not available",
+  };
+}
+
 function statusClass(label) {
   return `status-${String(label).toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
 }
@@ -578,6 +628,7 @@ function renderDetail() {
   const crm = detail.crmContext;
   const syncCheck = deriveSyncCheck(approval);
   const guardrail = deriveGuardrailCheck(detail, state.guardrailCheck);
+  const reviewerDecision = deriveReviewerDecisionSummary(detail);
   const detailErrorMarkup = state.detailError
     ? `
       <div class="section-hint">
@@ -641,10 +692,14 @@ function renderDetail() {
   const auditMarkup = detail.audit.length
     ? detail.audit
         .map(
-          (entry) => `
+          (entry) => {
+            const eventPresentation = getAuditEventPresentation(entry.eventType);
+            return `
             <article class="audit-item">
               <div class="timeline-topline">
-                <div class="timeline-type">${escapeHtml(entry.eventType)}</div>
+                <div class="badge ${eventPresentation.badgeClass}">${escapeHtml(
+                  eventPresentation.label,
+                )}</div>
                 <div class="timeline-date">${escapeHtml(
                   formatDate(entry.eventDate),
                 )}</div>
@@ -657,7 +712,8 @@ function renderDetail() {
                 <span>${escapeHtml(entry.externalSystem || "Creator")}</span>
               </div>
             </article>
-          `,
+          `;
+          },
         )
         .join("")
     : '<div class="section-hint">No audit entries recorded yet.</div>';
@@ -732,6 +788,47 @@ function renderDetail() {
           <span>Books invoice ID ${escapeHtml(invoice.booksInvoiceId)}</span>
           <span>Invoice date ${escapeHtml(formatShortDate(invoice.invoiceDate))}</span>
           <span>Last sync ${escapeHtml(formatDate(approval.lastBooksSyncAt))}</span>
+        </div>
+      </article>
+
+      <article class="detail-card action-card">
+        <div class="section-tag tag-creator">Reviewer Decision Summary</div>
+        <h3>Reviewer Decision Summary</h3>
+        <div class="meta-grid">
+          <div class="mini-card">
+            <div class="mini-label">Current Approval Status</div>
+            <div class="mini-value">${escapeHtml(reviewerDecision.approvalStatus)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Reviewer Notes</div>
+            <div class="mini-value">${escapeHtml(reviewerDecision.reviewerNotes)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Approval Decision Date</div>
+            <div class="mini-value">${escapeHtml(
+              formatDate(reviewerDecision.approvalDecisionDate),
+            )}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Exception Reason</div>
+            <div class="mini-value">${escapeHtml(reviewerDecision.exceptionReason)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Last Action By</div>
+            <div class="mini-value">${escapeHtml(reviewerDecision.lastActionBy)}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Last Action Date</div>
+            <div class="mini-value">${escapeHtml(
+              formatDate(reviewerDecision.lastActionDate),
+            )}</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-label">Last Event Type</div>
+          <div class="mini-value">${escapeHtml(
+            getAuditEventPresentation(reviewerDecision.lastEventType).label,
+          )}</div>
         </div>
       </article>
 
@@ -940,7 +1037,7 @@ function renderDetail() {
 
       <article class="detail-card full-span">
         <div class="section-tag tag-creator">Audit Trail</div>
-        <h3>Workflow history</h3>
+        <h3>Audit Timeline</h3>
         <div class="audit-list">${auditMarkup}</div>
       </article>
     </section>

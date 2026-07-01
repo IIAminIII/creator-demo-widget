@@ -201,6 +201,30 @@ function createMockService() {
         { approvalRecordId: recordId },
       );
     },
+    async refreshBooksInvoiceSnapshot(recordId) {
+      const index = findRecordIndex(state, recordId);
+
+      if (index === -1) {
+        throw new Error("The selected invoice approval record was not found.");
+      }
+
+      const record = state[index];
+      record.approval.lastBooksSyncAt = nowIso();
+      record.audit.unshift(
+        buildAuditEntry(record, {
+          eventType: "Books Snapshot Refreshed",
+          previousStatus: record.approval.approvalStatus,
+          newStatus: record.approval.approvalStatus,
+          eventMessage: "Books snapshot refreshed from the preview data source.",
+          actor: "System",
+          externalSystem: "Books",
+          externalReferenceId: record.invoice.booksInvoiceId,
+        }),
+      );
+      applyApprovalLastAction(record, record.audit[0]);
+
+      return deepClone(record);
+    },
     async approveInvoice(recordId, payload) {
       validateActionPayload("approve", payload);
       const index = findRecordIndex(state, recordId);
@@ -232,6 +256,7 @@ function createMockService() {
           actor: payload.reviewer,
         }),
       );
+      applyApprovalLastAction(record, record.audit[0]);
 
       return deepClone(record);
     },
@@ -263,6 +288,7 @@ function createMockService() {
           actor: payload.reviewer,
         }),
       );
+      applyApprovalLastAction(record, record.audit[0]);
 
       return deepClone(record);
     },
@@ -295,6 +321,7 @@ function createMockService() {
           actor: payload.reviewer,
         }),
       );
+      applyApprovalLastAction(record, record.audit[0]);
 
       return deepClone(record);
     },
@@ -321,6 +348,7 @@ function createMockService() {
           actor: payload.reviewer,
         }),
       );
+      applyApprovalLastAction(record, record.audit[0]);
 
       return deepClone(record);
     },
@@ -465,6 +493,26 @@ function normalizeSummary(rawSummary, items = []) {
   };
 }
 
+function applyApprovalLastAction(record, event) {
+  if (!record?.approval || !event) {
+    return;
+  }
+
+  record.approval.lastActionBy = event.actor || "";
+  record.approval.lastActionDate = event.eventDate || "";
+  record.approval.lastEventType = event.eventType || "";
+}
+
+function getLatestAuditSummary(audit = []) {
+  const latest = Array.isArray(audit) && audit.length ? audit[0] : null;
+
+  return {
+    lastActionBy: latest?.actor || "",
+    lastActionDate: latest?.eventDate || "",
+    lastEventType: latest?.eventType || "",
+  };
+}
+
 function mapApprovalRecord(record) {
   return {
     approvalRecordId: String(getNestedValue(record, ["ID", "id"], "")),
@@ -550,6 +598,15 @@ function mapApprovalRecord(record) {
     dealStage: String(getNestedValue(record, ["CRM_Deal_Stage"], "")),
     riskLevel: String(getNestedValue(record, ["CRM_Risk_Level"], "")),
     syncStatus: String(getNestedValue(record, ["Sync_Status", "syncStatus"], "Unknown")),
+    lastActionBy: String(
+      getNestedValue(record, ["Last_Action_By", "lastActionBy"], ""),
+    ),
+    lastActionDate: String(
+      getNestedValue(record, ["Last_Action_Date", "lastActionDate"], ""),
+    ),
+    lastEventType: String(
+      getNestedValue(record, ["Last_Event_Type", "lastEventType"], ""),
+    ),
   };
 }
 
@@ -641,6 +698,8 @@ function mapApiInvoiceDetail(detail) {
     ...(detail?.approval || {}),
   };
   const approvalRecord = mapApprovalRecord(detailSource);
+  const audit = toArray(detail?.audit).map(mapAuditRecord);
+  const lastAuditSummary = getLatestAuditSummary(audit);
 
   return {
     approvalRecordId: approvalRecord.approvalRecordId,
@@ -723,9 +782,30 @@ function mapApiInvoiceDetail(detail) {
       differenceFound: approvalRecord.differenceFound,
       differenceSummary: approvalRecord.differenceSummary,
       syncStatus: approvalRecord.syncStatus,
+      lastActionBy: String(
+        getNestedValue(
+          detailSource,
+          ["lastActionBy", "Last_Action_By"],
+          approvalRecord.lastActionBy || lastAuditSummary.lastActionBy,
+        ),
+      ),
+      lastActionDate: String(
+        getNestedValue(
+          detailSource,
+          ["lastActionDate", "Last_Action_Date"],
+          approvalRecord.lastActionDate || lastAuditSummary.lastActionDate,
+        ),
+      ),
+      lastEventType: String(
+        getNestedValue(
+          detailSource,
+          ["lastEventType", "Last_Event_Type"],
+          approvalRecord.lastEventType || lastAuditSummary.lastEventType,
+        ),
+      ),
     },
     comments: toArray(detail?.comments).map(mapCommentRecord),
-    audit: toArray(detail?.audit).map(mapAuditRecord),
+    audit,
   };
 }
 
@@ -1297,6 +1377,7 @@ function createCreatorService(config, creator, widgetContext) {
           )
         ).map(mapAuditRecord);
       }
+      const lastAuditSummary = getLatestAuditSummary(audit);
 
       return {
         approvalRecordId: approvalRecord.approvalRecordId,
@@ -1328,6 +1409,12 @@ function createCreatorService(config, creator, widgetContext) {
           differenceFound: approvalRecord.differenceFound,
           differenceSummary: approvalRecord.differenceSummary,
           syncStatus: approvalRecord.syncStatus,
+          lastActionBy:
+            approvalRecord.lastActionBy || lastAuditSummary.lastActionBy,
+          lastActionDate:
+            approvalRecord.lastActionDate || lastAuditSummary.lastActionDate,
+          lastEventType:
+            approvalRecord.lastEventType || lastAuditSummary.lastEventType,
         },
         comments,
         audit,

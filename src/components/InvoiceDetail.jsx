@@ -137,6 +137,76 @@ function deriveApprovalGuardrail(detail, guardrailCheck) {
   };
 }
 
+function getAuditEventPresentation(eventType = "") {
+  const normalized = eventType.trim().toLowerCase();
+
+  if (normalized === "approved") {
+    return {
+      label: "Invoice Approved",
+      toneClass: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    };
+  }
+
+  if (normalized === "rejected") {
+    return {
+      label: "Invoice Rejected",
+      toneClass: "bg-rose-50 text-rose-700 border-rose-200",
+    };
+  }
+
+  if (
+    normalized === "clarification requested" ||
+    normalized === "needs clarification"
+  ) {
+    return {
+      label: "Clarification Requested",
+      toneClass: "bg-amber-50 text-amber-700 border-amber-200",
+    };
+  }
+
+  if (normalized === "comment added") {
+    return {
+      label: "Comment Added",
+      toneClass: "bg-slate-100 text-slate-700 border-slate-200",
+    };
+  }
+
+  if (normalized === "books snapshot refreshed" || normalized === "books refresh") {
+    return {
+      label: "Books Snapshot Refreshed",
+      toneClass: "bg-sky-50 text-sky-700 border-sky-200",
+    };
+  }
+
+  if (normalized === "books sync failed" || normalized === "books refresh failed") {
+    return {
+      label: "Books Refresh Failed",
+      toneClass: "bg-rose-50 text-rose-700 border-rose-200",
+    };
+  }
+
+  return {
+    label: eventType || "Activity",
+    toneClass: "bg-slate-100 text-slate-700 border-slate-200",
+  };
+}
+
+function deriveReviewerDecisionSummary(detail) {
+  const latestAudit = Array.isArray(detail?.audit) && detail.audit.length
+    ? detail.audit[0]
+    : null;
+
+  return {
+    approvalStatus: detail?.approvalStatus || "Unknown",
+    reviewerNotes: detail?.reviewerNotes || "No reviewer notes yet.",
+    decisionDate: detail?.decisionDate || "",
+    exceptionReason: detail?.exceptionReason || "None",
+    lastActionBy: detail?.lastActionBy || latestAudit?.actor || "Not available",
+    lastActionDate: detail?.lastActionDate || latestAudit?.createdAt || "",
+    lastEventType: detail?.lastEventType || latestAudit?.eventType || "Not available",
+  };
+}
+
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 function isStaleSyncAt(syncAtString) {
@@ -183,6 +253,9 @@ export default function InvoiceDetail({
   const syncCard = detail ? deriveSyncStatus(detail) : null;
   const approvalGuardrail = detail
     ? deriveApprovalGuardrail(detail, guardrailCheck)
+    : null;
+  const reviewerDecisionSummary = detail
+    ? deriveReviewerDecisionSummary(detail)
     : null;
 
   if (loading) {
@@ -395,7 +468,7 @@ export default function InvoiceDetail({
                         </p>
                       </div>
                       <p className="mt-2 text-sm leading-6 text-slate-600">{entry.body}</p>
-                      <p className="mt-3 text-xs text-slate-400">{entry.createdAt}</p>
+                      <p className="mt-3 text-xs text-slate-400">{formatDateTime(entry.createdAt)}</p>
                     </div>
                   ))
                 ) : (
@@ -406,6 +479,45 @@ export default function InvoiceDetail({
           </section>
 
           <aside className="space-y-6">
+            <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                Reviewer Decision Summary
+              </div>
+              <h4 className="mt-3 text-lg font-semibold text-slate-900">Reviewer Decision Summary</h4>
+              <div className="mt-4 grid gap-3">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Current Approval Status</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{reviewerDecisionSummary.approvalStatus}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Reviewer Notes</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700">{reviewerDecisionSummary.reviewerNotes}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Approval Decision Date</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(reviewerDecisionSummary.decisionDate)}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Exception Reason</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700">{reviewerDecisionSummary.exceptionReason}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Action By</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{reviewerDecisionSummary.lastActionBy}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Action Date</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(reviewerDecisionSummary.lastActionDate)}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Event Type</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {getAuditEventPresentation(reviewerDecisionSummary.lastEventType).label}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
               <div className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700">
                 Approval Guardrails
@@ -577,14 +689,16 @@ export default function InvoiceDetail({
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
-              <h4 className="text-lg font-semibold text-slate-900">Audit trail</h4>
+              <h4 className="text-lg font-semibold text-slate-900">Audit Timeline</h4>
               <div className="mt-4 space-y-3">
                 {detail.audit?.length ? (
                   detail.audit.map((entry) => (
                     <div key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-slate-900">{entry.eventType}</p>
-                        <p className="text-xs text-slate-400">{entry.createdAt}</p>
+                        <div className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${getAuditEventPresentation(entry.eventType).toneClass}`}>
+                          {getAuditEventPresentation(entry.eventType).label}
+                        </div>
+                        <p className="text-xs text-slate-400">{formatDateTime(entry.createdAt)}</p>
                       </div>
                       <p className="mt-2 text-sm leading-6 text-slate-600">{entry.summary}</p>
                       <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">
