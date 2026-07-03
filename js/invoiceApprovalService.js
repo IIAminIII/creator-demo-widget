@@ -200,21 +200,36 @@ function sortInboxItems(items, filters = {}) {
   return sorted.slice(start, start + normalizedFilters.pageSize);
 }
 
+function toBackendStatusFilter(statusFilter) {
+  switch (statusFilter) {
+    case "Approved":
+    case "Rejected":
+      return statusFilter;
+    case "Under Review":
+    case "Needs Clarification":
+    case "Pending Review":
+      return statusFilter;
+    default:
+      return "All";
+  }
+}
+
 function buildInboxPayload(filters = {}) {
   const normalized = normalizeInboxFilters(filters);
+  const backendStatusFilter = toBackendStatusFilter(normalized.statusFilter);
 
   return {
-    statusFilter: normalized.statusFilter,
-    syncFilter: normalized.syncFilter,
-    paymentFilter: normalized.paymentFilter,
-    priorityFilter: normalized.priorityFilter,
+    statusFilter: backendStatusFilter,
+    syncFilter: "All",
+    paymentFilter: "All",
+    priorityFilter: "All",
     searchText: normalized.searchText,
     sortBy: normalized.sortBy,
     sortDirection: normalized.sortDirection,
     page: normalized.page,
     pageSize: normalized.pageSize,
     // Keep legacy inbox APIs working while the frontend applies the richer tabs.
-    status: "All",
+    status: backendStatusFilter,
     search: normalized.searchText,
   };
 }
