@@ -296,9 +296,16 @@ button {
 
 .toolbar-summary {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tab-row,
+.summary-chip-row {
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
 }
 
 .summary-chip,
@@ -316,6 +323,19 @@ button {
 .summary-chip {
   background: var(--surface-muted);
   color: var(--text-muted);
+  border: 1px solid transparent;
+}
+
+.summary-tab {
+  cursor: pointer;
+  background: #fff;
+  border-color: var(--border);
+}
+
+.summary-tab.active {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: rgba(41, 89, 214, 0.18);
 }
 
 .content-grid {
@@ -820,6 +840,26 @@ button {
 }
 
 .badge {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.badge.tone-success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.badge.tone-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.badge.tone-warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.badge.tone-neutral {
   background: var(--surface-muted);
   color: var(--text-muted);
 }

@@ -46,6 +46,44 @@ function StatCard({ label, value, helper }) {
   );
 }
 
+const DEFAULT_FILTERS = {
+  statusFilter: "All",
+  syncFilter: "All",
+  paymentFilter: "All",
+  priorityFilter: "All",
+  searchText: "",
+  sortBy: "dueDate",
+  sortDirection: "asc",
+  page: 1,
+  pageSize: 25,
+};
+
+const STATUS_TABS = [
+  "Pending",
+  "Review Needed",
+  "Manual Review",
+  "Failed",
+  "Approved",
+  "Rejected",
+  "All",
+];
+
+const SORT_OPTIONS = [
+  { value: "dueDate:asc", label: "Due date: soonest" },
+  { value: "dueDate:desc", label: "Due date: latest" },
+  { value: "invoiceTotal:desc", label: "Invoice total: high to low" },
+  { value: "invoiceTotal:asc", label: "Invoice total: low to high" },
+  { value: "invoiceNumber:asc", label: "Invoice number: A to Z" },
+  { value: "customerName:asc", label: "Customer: A to Z" },
+];
+
+function createDefaultFilters(defaultStatus = "All") {
+  return {
+    ...DEFAULT_FILTERS,
+    statusFilter: defaultStatus || "All",
+  };
+}
+
 function toInboxItemFromDetail(detail) {
   if (!detail) {
     return null;
@@ -64,6 +102,9 @@ function toInboxItemFromDetail(detail) {
     approvalStatus: detail.approvalStatus || "New",
     priority: detail.priority || "Medium",
     crmAccountName: detail.crmAccountName || detail.crmContext?.accountName || "",
+    crmDealName: detail.crmDealName || detail.crmContext?.dealName || "",
+    syncStatus: detail.syncStatus || "Unknown",
+    differenceFound: detail.differenceFound === true,
   };
 }
 
@@ -86,10 +127,9 @@ export default function App() {
     [api, config, creator, initData],
   );
 
-  const [filters, setFilters] = useState({
-    search: "",
-    status: config.inboxDefaultStatusFilter || "All",
-  });
+  const [filters, setFilters] = useState(() =>
+    createDefaultFilters(config.inboxDefaultStatusFilter),
+  );
   const [inboxItems, setInboxItems] = useState([]);
   const [summary, setSummary] = useState({
     total: 0,
@@ -167,8 +207,25 @@ export default function App() {
     });
   }
 
+  function updateFilters(updater) {
+    setFilters((current) => {
+      const next =
+        typeof updater === "function" ? updater(current) : { ...current, ...updater };
+      return {
+        ...current,
+        ...next,
+        page: 1,
+      };
+    });
+  }
+
+  function resetFilters() {
+    setFilters(createDefaultFilters(config.inboxDefaultStatusFilter));
+  }
+
   async function loadInbox(nextFilters = filters, options = {}) {
     const silent = options.silent === true;
+    const preserveSelectedRecordId = options.preserveSelectedRecordId ?? selectedRecordId;
 
     if (!silent) {
       setInboxLoading(true);
@@ -179,12 +236,14 @@ export default function App() {
       setInboxItems(response.items);
       setSummary(response.summary);
 
-      if (!selectedRecordId && response.items[0]) {
-        setSelectedRecordId(response.items[0].approvalRecordId);
-      } else if (
-        selectedRecordId &&
-        !response.items.some((item) => item.approvalRecordId === selectedRecordId)
+      if (
+        preserveSelectedRecordId &&
+        response.items.some((item) => item.approvalRecordId === preserveSelectedRecordId)
       ) {
+        setSelectedRecordId(preserveSelectedRecordId);
+      } else if (!preserveSelectedRecordId && response.items[0]) {
+        setSelectedRecordId(response.items[0].approvalRecordId);
+      } else if (preserveSelectedRecordId) {
         setSelectedRecordId(response.items[0]?.approvalRecordId ?? "");
       }
     } catch (error) {
@@ -235,11 +294,13 @@ export default function App() {
   }
 
   useEffect(() => {
-    loadInbox({
-      search: "",
-      status: config.inboxDefaultStatusFilter || "All",
-    });
+    const nextFilters = createDefaultFilters(config.inboxDefaultStatusFilter);
+    setFilters(nextFilters);
   }, [service, config.inboxDefaultStatusFilter]);
+
+  useEffect(() => {
+    loadInbox(filters, { preserveSelectedRecordId: selectedRecordId });
+  }, [filters, service]);
 
   useEffect(() => {
     if (selectedRecordId) {
@@ -259,7 +320,10 @@ export default function App() {
         return;
       }
 
-      void loadInbox(filters, { silent: true }).then(() => {
+      void loadInbox(filters, {
+        silent: true,
+        preserveSelectedRecordId: selectedRecordId,
+      }).then(() => {
         if (selectedRecordId) {
           return loadDetail(selectedRecordId, { silent: true });
         }
@@ -280,6 +344,7 @@ export default function App() {
 
   async function runAction(action) {
     setActionLoading(true);
+    const activeRecordId = selectedRecordId;
 
     try {
       const detail = await action();
@@ -295,7 +360,7 @@ export default function App() {
           ),
         );
       }
-      await loadInbox();
+      await loadInbox(filters, { preserveSelectedRecordId: activeRecordId });
       if (refreshedInboxItem?.approvalRecordId) {
         setInboxItems((current) =>
           current.map((item) =>
@@ -368,6 +433,7 @@ export default function App() {
 
   async function runApproveAction(payload) {
     setActionLoading(true);
+    const activeRecordId = selectedRecordId;
 
     try {
       const validation = await service.validateInvoiceApproval(selectedRecordId);
@@ -412,7 +478,7 @@ export default function App() {
         );
       }
 
-      await loadInbox();
+      await loadInbox(filters, { preserveSelectedRecordId: activeRecordId });
 
       if (refreshedInboxItem?.approvalRecordId) {
         setInboxItems((current) =>
@@ -439,6 +505,8 @@ export default function App() {
       setActionLoading(false);
     }
   }
+
+  const selectedSortValue = `${filters.sortBy}:${filters.sortDirection}`;
 
   if (initLoading) {
     return <LoadingSpinner label="Initializing invoice approval widget..." />;
@@ -495,35 +563,107 @@ export default function App() {
       </section>
 
       <section className="widget-surface p-5">
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap gap-2">
+          {STATUS_TABS.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                filters.statusFilter === tab
+                  ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+              onClick={() => updateFilters({ statusFilter: tab })}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-end gap-3">
           <label className="widget-field">
             <span className="widget-label">Search invoices</span>
             <input
               className="widget-input"
-              placeholder="Invoice number, customer, or CRM account"
-              value={filters.search}
+              placeholder="Search invoice, customer, deal..."
+              value={filters.searchText}
               onChange={(event) =>
-                setFilters((current) => ({ ...current, search: event.target.value }))
+                updateFilters({ searchText: event.target.value })
               }
             />
           </label>
           <label className="widget-field">
-            <span className="widget-label">Approval status</span>
+            <span className="widget-label">Sync</span>
             <select
               className="widget-input"
-              value={filters.status}
+              value={filters.syncFilter}
               onChange={(event) =>
-                setFilters((current) => ({ ...current, status: event.target.value }))
+                updateFilters({ syncFilter: event.target.value })
               }
             >
               <option value="All">All</option>
-              <option value="New">New</option>
-              <option value="Under Review">Under Review</option>
-              <option value="Needs Clarification">Needs Clarification</option>
-              <option value="Approved">Approved</option>
-              <option value="Rejected">Rejected</option>
+              <option value="Synced">Synced</option>
+              <option value="Manual Review">Manual Review</option>
+              <option value="Failed">Failed</option>
+              <option value="Difference Found">Difference Found</option>
             </select>
           </label>
+          <label className="widget-field">
+            <span className="widget-label">Payment</span>
+            <select
+              className="widget-input"
+              value={filters.paymentFilter}
+              onChange={(event) =>
+                updateFilters({ paymentFilter: event.target.value })
+              }
+            >
+              <option value="All">All</option>
+              <option value="Paid">Paid</option>
+              <option value="Unpaid">Unpaid</option>
+              <option value="Partially Paid">Partially Paid</option>
+              <option value="Overdue">Overdue</option>
+            </select>
+          </label>
+          <label className="widget-field">
+            <span className="widget-label">Priority</span>
+            <select
+              className="widget-input"
+              value={filters.priorityFilter}
+              onChange={(event) =>
+                updateFilters({ priorityFilter: event.target.value })
+              }
+            >
+              <option value="All">All</option>
+              <option value="Urgent">Urgent</option>
+              <option value="High">High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </label>
+          <label className="widget-field">
+            <span className="widget-label">Sort</span>
+            <select
+              className="widget-input"
+              value={selectedSortValue}
+              onChange={(event) => {
+                const [sortBy, sortDirection] = event.target.value.split(":");
+                updateFilters({ sortBy, sortDirection });
+              }}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="widget-secondary-button"
+            onClick={resetFilters}
+          >
+            Reset filters
+          </button>
           <button
             type="button"
             className="widget-primary-button"
@@ -536,19 +676,21 @@ export default function App() {
 
         <div className="mt-5 flex flex-wrap gap-3 text-sm">
           <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
-            New: {summary.newCount}
+            Pending: {summary.newCount}
           </span>
           <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">
-            Under review: {summary.underReviewCount}
+            Review needed: {summary.underReviewCount}
           </span>
           <span className="rounded-full bg-rose-50 px-3 py-1 text-rose-700">
-            Clarification: {summary.clarificationCount}
+            Manual review: {summary.clarificationCount}
           </span>
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
             Approved: {summary.approvedCount}
           </span>
+          <span className="rounded-full bg-red-50 px-3 py-1 text-red-700">
+            Rejected: {summary.rejectedCount}
+          </span>
         </div>
-
       </section>
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
@@ -557,6 +699,7 @@ export default function App() {
           loading={inboxLoading}
           selectedRecordId={selectedRecordId}
           onSelect={setSelectedRecordId}
+          filters={filters}
         />
 
         <InvoiceDetail

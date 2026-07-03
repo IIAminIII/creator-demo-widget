@@ -30,18 +30,33 @@
 
       <section class="toolbar-card">
         <div class="toolbar-row">
-          <label class="field">
-            <span>Approval status</span>
-            <select id="status-filter"></select>
-          </label>
           <label class="field field-search">
             <span>Search invoices</span>
             <input
               id="search-filter"
               type="search"
-              placeholder="Invoice number, customer, account, or deal"
+              placeholder="Search invoice, customer, deal..."
             />
           </label>
+          <label class="field">
+            <span>Sync</span>
+            <select id="sync-filter"></select>
+          </label>
+          <label class="field">
+            <span>Payment</span>
+            <select id="payment-filter"></select>
+          </label>
+          <label class="field">
+            <span>Priority</span>
+            <select id="priority-filter"></select>
+          </label>
+          <label class="field">
+            <span>Sort</span>
+            <select id="sort-filter"></select>
+          </label>
+          <button class="ghost-button" id="reset-filters-button" type="button">
+            Reset filters
+          </button>
           <button class="secondary-button" id="refresh-button" type="button">
             Refresh inbox
           </button>

@@ -5,8 +5,15 @@ const state = {
   service: null,
   runtimeInfo: null,
   filters: {
-    approvalStatus: "All",
-    search: "",
+    statusFilter: "All",
+    syncFilter: "All",
+    paymentFilter: "All",
+    priorityFilter: "All",
+    searchText: "",
+    sortBy: "dueDate",
+    sortDirection: "asc",
+    page: 1,
+    pageSize: 25,
   },
   inboxItems: [],
   summary: {
@@ -30,6 +37,28 @@ const state = {
   autoRefreshInFlight: false,
   guardrailCheck: null,
 };
+
+const STATUS_TABS = [
+  "Pending",
+  "Review Needed",
+  "Manual Review",
+  "Failed",
+  "Approved",
+  "Rejected",
+  "All",
+];
+
+const SYNC_FILTERS = ["All", "Synced", "Manual Review", "Failed", "Difference Found"];
+const PAYMENT_FILTERS = ["All", "Paid", "Unpaid", "Partially Paid", "Overdue"];
+const PRIORITY_FILTERS = ["All", "Urgent", "High", "Medium", "Low"];
+const SORT_OPTIONS = [
+  { value: "dueDate:asc", label: "Due date: soonest" },
+  { value: "dueDate:desc", label: "Due date: latest" },
+  { value: "invoiceTotal:desc", label: "Invoice total: high to low" },
+  { value: "invoiceTotal:asc", label: "Invoice total: low to high" },
+  { value: "invoiceNumber:asc", label: "Invoice number: A to Z" },
+  { value: "customerName:asc", label: "Customer: A to Z" },
+];
 
 const elements = {};
 
@@ -310,12 +339,108 @@ function statusClass(label) {
   return `status-${String(label).toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
 }
 
-function priorityClass(label) {
-  return `priority-${String(label).toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
+function toneClass(label) {
+  const normalized = normalizeText(label).toLowerCase();
+
+  if (
+    normalized.includes("approved") ||
+    normalized.includes("synced") ||
+    normalized === "paid"
+  ) {
+    return "tone-success";
+  }
+
+  if (normalized.includes("rejected") || normalized.includes("failed")) {
+    return "tone-danger";
+  }
+
+  if (
+    normalized.includes("clarification") ||
+    normalized.includes("review needed") ||
+    normalized.includes("manual review") ||
+    normalized.includes("difference found") ||
+    normalized.includes("overdue") ||
+    normalized.includes("under review") ||
+    normalized.includes("unpaid") ||
+    normalized.includes("partially paid")
+  ) {
+    return "tone-warning";
+  }
+
+  return "tone-neutral";
 }
 
 function renderBadge(label, className) {
   return `<span class="badge ${className}">${escapeHtml(label)}</span>`;
+}
+
+function isOverdueInvoice(item) {
+  if (!item?.dueDate) {
+    return false;
+  }
+
+  const parsed = new Date(item.dueDate);
+  if (Number.isNaN(parsed.getTime())) {
+    return false;
+  }
+
+  const status = normalizeText(item.approvalStatus).toLowerCase();
+  return !["approved", "rejected"].includes(status) && parsed.getTime() < Date.now();
+}
+
+function formatFilterCount(statusFilter) {
+  return state.inboxItems.filter((item) => {
+    switch (statusFilter) {
+      case "Pending":
+        return ["pending review", "new"].includes(
+          normalizeText(item.approvalStatus).toLowerCase(),
+        );
+      case "Review Needed":
+        return ["under review", "needs clarification"].includes(
+          normalizeText(item.approvalStatus).toLowerCase(),
+        );
+      case "Manual Review":
+        return (
+          normalizeText(item.syncStatus).toLowerCase().includes("manual") ||
+          normalizeText(item.syncStatus).toLowerCase().includes("warning") ||
+          item.differenceFound === true
+        );
+      case "Failed":
+        return normalizeText(item.syncStatus).toLowerCase().includes("failed");
+      case "Approved":
+      case "Rejected":
+        return item.approvalStatus === statusFilter;
+      case "All":
+      default:
+        return true;
+    }
+  }).length;
+}
+
+function getInboxEmptyState() {
+  if (normalizeText(state.filters.searchText)) {
+    return {
+      title: "No invoices found for this search.",
+      message: "Try a broader search term or clear the search box.",
+    };
+  }
+
+  if (
+    state.filters.statusFilter === "Pending" &&
+    state.filters.syncFilter === "All" &&
+    state.filters.paymentFilter === "All" &&
+    state.filters.priorityFilter === "All"
+  ) {
+    return {
+      title: "No pending invoices right now.",
+      message: "The pending queue is clear at the moment.",
+    };
+  }
+
+  return {
+    title: "No invoices match the selected filters.",
+    message: "Adjust the current filters or reset them to broaden the inbox.",
+  };
 }
 
 function removeToast(toast) {
@@ -490,17 +615,41 @@ function renderKpis() {
 }
 
 function renderToolbarSummary() {
+  const tabs = STATUS_TABS.map(
+    (status) => `
+      <button
+        type="button"
+        class="summary-chip summary-tab ${state.filters.statusFilter === status ? "active" : ""}"
+        data-status-tab="${escapeHtml(status)}"
+      >
+        ${escapeHtml(status)} ${formatFilterCount(status)}
+      </button>
+    `,
+  ).join("");
+
   const chips = [
-    `New ${state.summary.newCount}`,
-    `Under Review ${state.summary.underReviewCount}`,
-    `Needs Clarification ${state.summary.clarificationCount}`,
+    `Pending ${state.summary.newCount}`,
+    `Review Needed ${state.summary.underReviewCount}`,
+    `Manual Review ${state.summary.clarificationCount}`,
     `Approved ${state.summary.approvedCount}`,
     `Rejected ${state.summary.rejectedCount}`,
-  ];
-
-  elements.toolbarSummary.innerHTML = chips
+  ]
     .map((chip) => `<span class="summary-chip">${escapeHtml(chip)}</span>`)
     .join("");
+
+  elements.toolbarSummary.innerHTML = `
+    <div class="tab-row">${tabs}</div>
+    <div class="summary-chip-row">${chips}</div>
+  `;
+
+  elements.toolbarSummary.querySelectorAll("[data-status-tab]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.filters.statusFilter = button.getAttribute("data-status-tab") || "All";
+      syncToolbarInputs();
+      await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
+      await loadDetail(state.selectedRecordId);
+    });
+  });
 }
 
 function toInboxItemFromDetail(detail) {
@@ -521,6 +670,9 @@ function toInboxItemFromDetail(detail) {
     approvalStatus: detail.approval.approvalStatus || "Pending Review",
     priority: detail.approval.priority || "Medium",
     crmAccountName: detail.crmContext?.crmAccountName || detail.invoice.crmAccountName || "",
+    crmDealName: detail.crmContext?.crmDealName || "",
+    syncStatus: detail.approval.syncStatus || "Unknown",
+    differenceFound: detail.approval.differenceFound === true,
   };
 }
 
@@ -570,11 +722,12 @@ function renderInbox() {
   }
 
   if (!state.inboxItems.length) {
+    const emptyState = getInboxEmptyState();
     elements.inboxList.classList.remove("scrollable");
     elements.inboxList.innerHTML = `
       <div class="empty-state">
-        <h3>No invoice records match the current filters</h3>
-        <p>Try a different approval status or clear the search box.</p>
+        <h3>${escapeHtml(emptyState.title)}</h3>
+        <p>${escapeHtml(emptyState.message)}</p>
     </div>
   `;
     return;
@@ -600,6 +753,7 @@ function renderInbox() {
     .map((item) => {
       const activeClass =
         item.approvalRecordId === state.selectedRecordId ? "active" : "";
+      const overdue = isOverdueInvoice(item);
       return `
         <button
           type="button"
@@ -610,9 +764,12 @@ function renderInbox() {
             <div>
               <p class="inbox-title">${escapeHtml(item.invoiceNumber)}</p>
               <div class="badge-row">
-                ${renderBadge(item.approvalStatus, statusClass(item.approvalStatus))}
-                ${renderBadge(item.priority, priorityClass(item.priority))}
-                ${renderBadge("Books", "source-books")}
+                ${renderBadge(item.approvalStatus, toneClass(item.approvalStatus))}
+                ${renderBadge(item.syncStatus || "Unknown", toneClass(item.syncStatus))}
+                ${renderBadge(item.paymentStatus || "Unknown", toneClass(item.paymentStatus))}
+                ${renderBadge(item.priority, toneClass(item.priority))}
+                ${item.differenceFound ? renderBadge("Difference Found", "tone-warning") : ""}
+                ${overdue ? renderBadge("Overdue", "tone-warning") : ""}
               </div>
             </div>
             <div class="amount">${escapeHtml(
@@ -622,8 +779,7 @@ function renderInbox() {
           <div class="meta-row">
             <span>${escapeHtml(item.customerName || "Not available")}</span>
             <span>Due ${escapeHtml(formatShortDate(item.dueDate))}</span>
-            <span>Books ${escapeHtml(item.booksStatus || "Unknown")}</span>
-            <span>Payment ${escapeHtml(item.paymentStatus || "Unknown")}</span>
+            <span>${escapeHtml(item.crmDealName || "No deal linked")}</span>
           </div>
           <div class="meta-row">
             <span>Account ${escapeHtml(item.crmAccountName || "Not linked yet")}</span>
@@ -1302,6 +1458,28 @@ function wireDetailRetryButton() {
   retryButton?.addEventListener("click", () => void loadDetail(state.selectedRecordId));
 }
 
+function syncToolbarInputs() {
+  if (elements.searchFilter) {
+    elements.searchFilter.value = state.filters.searchText;
+  }
+
+  if (elements.syncFilter) {
+    elements.syncFilter.value = state.filters.syncFilter;
+  }
+
+  if (elements.paymentFilter) {
+    elements.paymentFilter.value = state.filters.paymentFilter;
+  }
+
+  if (elements.priorityFilter) {
+    elements.priorityFilter.value = state.filters.priorityFilter;
+  }
+
+  if (elements.sortFilter) {
+    elements.sortFilter.value = `${state.filters.sortBy}:${state.filters.sortDirection}`;
+  }
+}
+
 async function loadInbox(options = {}) {
   const preserveSelectedRecordId = options.preserveSelectedRecordId || "";
   const silent = options.silent === true;
@@ -1456,30 +1634,92 @@ async function runAction(callback, successMessage = "Workflow action completed s
 }
 
 function bindToolbar() {
-  state.config.filters.approvalStatuses.forEach((status) => {
+  SYNC_FILTERS.forEach((value) => {
     const option = document.createElement("option");
-    option.value = status;
-    option.textContent = status;
-    elements.statusFilter.appendChild(option);
+    option.value = value;
+    option.textContent = value;
+    elements.syncFilter.appendChild(option);
   });
 
-  elements.statusFilter.value = state.filters.approvalStatus;
-  elements.searchFilter.value = state.filters.search;
+  PAYMENT_FILTERS.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    elements.paymentFilter.appendChild(option);
+  });
 
-  elements.statusFilter.addEventListener("change", async (event) => {
-    state.filters.approvalStatus = event.target.value;
-    await loadInbox();
+  PRIORITY_FILTERS.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    elements.priorityFilter.appendChild(option);
+  });
+
+  SORT_OPTIONS.forEach((optionConfig) => {
+    const option = document.createElement("option");
+    option.value = optionConfig.value;
+    option.textContent = optionConfig.label;
+    elements.sortFilter.appendChild(option);
+  });
+
+  syncToolbarInputs();
+
+  elements.searchFilter.addEventListener("input", async (event) => {
+    state.filters.searchText = event.target.value;
+    state.filters.page = 1;
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
     await loadDetail(state.selectedRecordId);
   });
 
-  elements.searchFilter.addEventListener("input", async (event) => {
-    state.filters.search = event.target.value;
-    await loadInbox();
+  elements.syncFilter.addEventListener("change", async (event) => {
+    state.filters.syncFilter = event.target.value;
+    state.filters.page = 1;
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
+    await loadDetail(state.selectedRecordId);
+  });
+
+  elements.paymentFilter.addEventListener("change", async (event) => {
+    state.filters.paymentFilter = event.target.value;
+    state.filters.page = 1;
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
+    await loadDetail(state.selectedRecordId);
+  });
+
+  elements.priorityFilter.addEventListener("change", async (event) => {
+    state.filters.priorityFilter = event.target.value;
+    state.filters.page = 1;
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
+    await loadDetail(state.selectedRecordId);
+  });
+
+  elements.sortFilter.addEventListener("change", async (event) => {
+    const [sortBy, sortDirection] = String(event.target.value || "dueDate:asc").split(":");
+    state.filters.sortBy = sortBy || "dueDate";
+    state.filters.sortDirection = sortDirection || "asc";
+    state.filters.page = 1;
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
+    await loadDetail(state.selectedRecordId);
+  });
+
+  elements.resetFiltersButton.addEventListener("click", async () => {
+    state.filters = {
+      statusFilter: "All",
+      syncFilter: "All",
+      paymentFilter: "All",
+      priorityFilter: "All",
+      searchText: "",
+      sortBy: "dueDate",
+      sortDirection: "asc",
+      page: 1,
+      pageSize: 25,
+    };
+    syncToolbarInputs();
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
     await loadDetail(state.selectedRecordId);
   });
 
   elements.refreshButton.addEventListener("click", async () => {
-    await loadInbox();
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
     await loadDetail(state.selectedRecordId);
     showToast("Inbox refreshed.");
   });
@@ -1487,8 +1727,12 @@ function bindToolbar() {
 
 async function bootstrap() {
   elements.kpiGrid = document.getElementById("kpi-grid");
-  elements.statusFilter = document.getElementById("status-filter");
   elements.searchFilter = document.getElementById("search-filter");
+  elements.syncFilter = document.getElementById("sync-filter");
+  elements.paymentFilter = document.getElementById("payment-filter");
+  elements.priorityFilter = document.getElementById("priority-filter");
+  elements.sortFilter = document.getElementById("sort-filter");
+  elements.resetFiltersButton = document.getElementById("reset-filters-button");
   elements.refreshButton = document.getElementById("refresh-button");
   elements.toolbarSummary = document.getElementById("toolbar-summary");
   elements.inboxList = document.getElementById("inbox-list");

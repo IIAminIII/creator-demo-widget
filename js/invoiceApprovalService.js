@@ -37,26 +37,115 @@ function toInboxItem(record) {
     approvalStatus: record.approval.approvalStatus,
     priority: record.approval.priority,
     crmAccountName: record.crmContext.crmAccountName,
+    crmDealName: record.crmContext.crmDealName,
+    syncStatus: record.approval.syncStatus,
+    differenceFound: toBooleanLike(record.approval.differenceFound, false),
   };
 }
 
-function matchesFilters(item, filters = {}) {
-  const status = filters.approvalStatus || "All";
-  const search = normalizeText(filters.search).toLowerCase();
+function normalizeInboxFilters(filters = {}) {
+  return {
+    statusFilter: normalizeText(filters.statusFilter || filters.approvalStatus) || "All",
+    syncFilter: normalizeText(filters.syncFilter) || "All",
+    paymentFilter: normalizeText(filters.paymentFilter) || "All",
+    priorityFilter: normalizeText(filters.priorityFilter) || "All",
+    searchText: normalizeText(filters.searchText || filters.search),
+    sortBy: normalizeText(filters.sortBy) || "dueDate",
+    sortDirection: normalizeText(filters.sortDirection) || "asc",
+    page: Math.max(1, Number(filters.page) || 1),
+    pageSize: Math.max(1, Number(filters.pageSize) || 25),
+  };
+}
 
-  if (status !== "All") {
-    const normalizedItemStatus = normalizeApprovalStatus(item.approvalStatus);
-    const statusMatches =
-      item.approvalStatus === status ||
-      normalizedItemStatus === status ||
-      (status === "New" && normalizedItemStatus === "Pending Review");
+function normalizeBadgeText(value) {
+  return normalizeText(value).toLowerCase();
+}
 
-    if (!statusMatches) {
-      return false;
-    }
+function isOverdueInvoice(item) {
+  if (!item?.dueDate) {
+    return false;
   }
 
-  if (!search) {
+  const dueDate = new Date(item.dueDate);
+  if (Number.isNaN(dueDate.getTime())) {
+    return false;
+  }
+
+  const approvalStatus = normalizeBadgeText(item.approvalStatus);
+  return !["approved", "rejected"].includes(approvalStatus) && dueDate.getTime() < Date.now();
+}
+
+function matchesStatusTab(item, statusFilter) {
+  if (!statusFilter || statusFilter === "All") {
+    return true;
+  }
+
+  const approvalStatus = normalizeApprovalStatus(item.approvalStatus);
+  const normalizedStatus = approvalStatus.toLowerCase();
+  const syncStatus = normalizeBadgeText(item.syncStatus);
+
+  switch (statusFilter) {
+    case "Pending":
+      return ["new", "pending review"].includes(normalizedStatus);
+    case "Review Needed":
+      return ["under review", "needs clarification"].includes(normalizedStatus);
+    case "Manual Review":
+      return (
+        syncStatus.includes("manual") ||
+        syncStatus.includes("warning") ||
+        item.differenceFound === true
+      );
+    case "Failed":
+      return syncStatus.includes("failed");
+    case "Approved":
+    case "Rejected":
+      return approvalStatus === statusFilter;
+    default:
+      return approvalStatus === statusFilter || normalizedStatus === statusFilter.toLowerCase();
+  }
+}
+
+function matchesSelectFilter(itemValue, filterValue) {
+  if (!filterValue || filterValue === "All") {
+    return true;
+  }
+
+  return normalizeBadgeText(itemValue) === normalizeBadgeText(filterValue);
+}
+
+function matchesFilters(item, filters = {}) {
+  const normalizedFilters = normalizeInboxFilters(filters);
+
+  if (!matchesStatusTab(item, normalizedFilters.statusFilter)) {
+    return false;
+  }
+
+  if (
+    normalizedFilters.syncFilter !== "All" &&
+    !(
+      (normalizedFilters.syncFilter === "Difference Found" &&
+        item.differenceFound === true) ||
+      matchesSelectFilter(item.syncStatus, normalizedFilters.syncFilter)
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    normalizedFilters.paymentFilter !== "All" &&
+    !(
+      (normalizedFilters.paymentFilter === "Overdue" && isOverdueInvoice(item)) ||
+      matchesSelectFilter(item.paymentStatus, normalizedFilters.paymentFilter)
+    )
+  ) {
+    return false;
+  }
+
+  if (!matchesSelectFilter(item.priority, normalizedFilters.priorityFilter)) {
+    return false;
+  }
+
+  if (!normalizedFilters.searchText) {
     return true;
   }
 
@@ -64,12 +153,67 @@ function matchesFilters(item, filters = {}) {
     item.invoiceNumber,
     item.customerName,
     item.crmAccountName,
+    item.crmDealName,
     item.booksInvoiceId,
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
-    .includes(search);
+    .includes(normalizedFilters.searchText.toLowerCase());
+}
+
+function compareText(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function compareDateValues(left, right) {
+  const leftTime = left ? new Date(left).getTime() : Number.POSITIVE_INFINITY;
+  const rightTime = right ? new Date(right).getTime() : Number.POSITIVE_INFINITY;
+  return leftTime - rightTime;
+}
+
+function sortInboxItems(items, filters = {}) {
+  const normalizedFilters = normalizeInboxFilters(filters);
+  const direction = normalizedFilters.sortDirection === "desc" ? -1 : 1;
+  const sorted = [...items].sort((left, right) => {
+    switch (normalizedFilters.sortBy) {
+      case "invoiceTotal":
+        return (toNumber(left.invoiceTotal) - toNumber(right.invoiceTotal)) * direction;
+      case "invoiceNumber":
+        return compareText(left.invoiceNumber, right.invoiceNumber) * direction;
+      case "customerName":
+        return compareText(left.customerName, right.customerName) * direction;
+      case "approvalStatus":
+        return compareText(left.approvalStatus, right.approvalStatus) * direction;
+      case "priority":
+        return compareText(left.priority, right.priority) * direction;
+      case "dueDate":
+      default:
+        return compareDateValues(left.dueDate, right.dueDate) * direction;
+    }
+  });
+
+  const start = (normalizedFilters.page - 1) * normalizedFilters.pageSize;
+  return sorted.slice(start, start + normalizedFilters.pageSize);
+}
+
+function buildInboxPayload(filters = {}) {
+  const normalized = normalizeInboxFilters(filters);
+
+  return {
+    statusFilter: normalized.statusFilter,
+    syncFilter: normalized.syncFilter,
+    paymentFilter: normalized.paymentFilter,
+    priorityFilter: normalized.priorityFilter,
+    searchText: normalized.searchText,
+    sortBy: normalized.sortBy,
+    sortDirection: normalized.sortDirection,
+    page: normalized.page,
+    pageSize: normalized.pageSize,
+  };
 }
 
 function getSummary(items) {
@@ -168,7 +312,7 @@ function createMockService() {
       const allItems = state.map(toInboxItem);
       const items = allItems.filter((item) => matchesFilters(item, filters));
       return {
-        items: deepClone(items),
+        items: deepClone(sortInboxItems(items, filters)),
         summary: getSummary(allItems),
       };
     },
@@ -1202,6 +1346,9 @@ function toInboxItemFromApprovalRecord(record) {
     approvalStatus: record.approvalStatus,
     priority: record.priority,
     crmAccountName: record.crmAccountName,
+    crmDealName: record.crmDealName,
+    syncStatus: record.syncStatus,
+    differenceFound: toBooleanLike(record.differenceFound, false),
   };
 }
 
@@ -1253,20 +1400,25 @@ function createCreatorService(config, creator, widgetContext) {
     async loadInbox(filters = {}) {
       if (customApis.loadInbox) {
         try {
-          const response = await invokeCreatorCustomApi(customApis.loadInbox, {
-            status: filters.approvalStatus || filters.status || "All",
-            search: filters.search || "",
-          });
+          const response = await invokeCreatorCustomApi(
+            customApis.loadInbox,
+            buildInboxPayload(filters),
+          );
           const normalized = normalizeApiEnvelope(response);
           const items = normalized?.items || normalized?.data?.items;
 
           if (Array.isArray(items)) {
-            const filteredItems = items.filter((item) => matchesFilters(item, filters));
+            const normalizedItems = items.map((item) =>
+              item?.approvalRecordId ? item : mapApprovalRecord(item),
+            );
+            const filteredItems = normalizedItems.filter((item) =>
+              matchesFilters(item, filters),
+            );
             return {
-              items: deepClone(filteredItems),
+              items: deepClone(sortInboxItems(filteredItems, filters)),
               summary: normalizeSummary(
                 normalized?.summary || normalized?.data?.summary,
-                items,
+                normalizedItems,
               ),
             };
           }
@@ -1288,14 +1440,14 @@ function createCreatorService(config, creator, widgetContext) {
         const items = allItems.filter((item) => matchesFilters(item, filters));
 
         return {
-          items: deepClone(items),
+          items: deepClone(sortInboxItems(items, filters)),
           summary: getSummary(allItems),
         };
       } catch (recordError) {
-        const response = await invokeCreatorCustomApi(customApis.loadInbox, {
-          status: filters.approvalStatus || filters.status || "All",
-          search: filters.search || "",
-        });
+        const response = await invokeCreatorCustomApi(
+          customApis.loadInbox,
+          buildInboxPayload(filters),
+        );
 
         const normalized = normalizeApiEnvelope(response);
         const items = normalized?.items || normalized?.data?.items;
@@ -1309,7 +1461,12 @@ function createCreatorService(config, creator, widgetContext) {
         }
 
         return {
-          items: items.filter((item) => matchesFilters(item, filters)),
+          items: sortInboxItems(
+            items
+              .map((item) => (item?.approvalRecordId ? item : mapApprovalRecord(item)))
+              .filter((item) => matchesFilters(item, filters)),
+            filters,
+          ),
           summary: normalizeSummary(
             normalized?.summary || normalized?.data?.summary,
             items,

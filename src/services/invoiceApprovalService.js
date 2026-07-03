@@ -73,18 +73,116 @@ function extractLineItems(detail = {}) {
   return source.map(normalizeLineItem);
 }
 
-function matchesFilter(item, filters) {
-  const normalizedStatus = normalizeStatus(item.approvalStatus);
-  const statusMatches =
-    !filters.status ||
-    filters.status === "All" ||
-    item.approvalStatus === filters.status ||
-    normalizedStatus === filters.status ||
-    (filters.status === "New" && normalizedStatus === "Pending Review");
-  const search = filters.search?.trim().toLowerCase();
+function normalizeFilterValue(value, fallback = "All") {
+  return getFirstString(value, fallback);
+}
+
+function normalizeInboxFilters(filters = {}) {
+  return {
+    statusFilter: normalizeFilterValue(filters.statusFilter ?? filters.status, "All"),
+    syncFilter: normalizeFilterValue(filters.syncFilter, "All"),
+    paymentFilter: normalizeFilterValue(filters.paymentFilter, "All"),
+    priorityFilter: normalizeFilterValue(filters.priorityFilter, "All"),
+    searchText: getFirstString(filters.searchText, filters.search),
+    sortBy: getFirstString(filters.sortBy, "dueDate"),
+    sortDirection: getFirstString(filters.sortDirection, "asc"),
+    page: Math.max(1, Number(filters.page) || 1),
+    pageSize: Math.max(1, Number(filters.pageSize) || 25),
+  };
+}
+
+function normalizeBadgeValue(value) {
+  return getFirstString(value).toLowerCase();
+}
+
+function isOverdueInvoice(item) {
+  if (!item?.dueDate) {
+    return false;
+  }
+
+  const dueDate = new Date(item.dueDate);
+  if (Number.isNaN(dueDate.getTime())) {
+    return false;
+  }
+
+  const status = normalizeBadgeValue(item.approvalStatus);
+  return !["approved", "rejected"].includes(status) && dueDate.getTime() < Date.now();
+}
+
+function matchesStatusTab(item, statusFilter) {
+  if (!statusFilter || statusFilter === "All") {
+    return true;
+  }
+
+  const approvalStatus = normalizeStatus(item.approvalStatus);
+  const normalizedStatus = approvalStatus.toLowerCase();
+  const syncStatus = normalizeBadgeValue(item.syncStatus);
+
+  switch (statusFilter) {
+    case "Pending":
+      return ["new", "pending review"].includes(normalizedStatus);
+    case "Review Needed":
+      return ["under review", "needs clarification"].includes(normalizedStatus);
+    case "Manual Review":
+      return (
+        syncStatus.includes("manual") ||
+        syncStatus.includes("warning") ||
+        item.differenceFound === true
+      );
+    case "Failed":
+      return syncStatus.includes("failed");
+    case "Approved":
+    case "Rejected":
+      return approvalStatus === statusFilter;
+    default:
+      return (
+        approvalStatus === statusFilter ||
+        normalizedStatus === statusFilter.toLowerCase()
+      );
+  }
+}
+
+function matchesSelectFilter(itemValue, filterValue) {
+  if (!filterValue || filterValue === "All") {
+    return true;
+  }
+
+  return normalizeBadgeValue(itemValue) === normalizeBadgeValue(filterValue);
+}
+
+function matchesSyncFilter(item, syncFilter) {
+  if (!syncFilter || syncFilter === "All") {
+    return true;
+  }
+
+  if (syncFilter === "Difference Found") {
+    return item.differenceFound === true;
+  }
+
+  return matchesSelectFilter(item.syncStatus, syncFilter);
+}
+
+function matchesPaymentFilter(item, paymentFilter) {
+  if (!paymentFilter || paymentFilter === "All") {
+    return true;
+  }
+
+  if (paymentFilter === "Overdue") {
+    return isOverdueInvoice(item);
+  }
+
+  return matchesSelectFilter(item.paymentStatus, paymentFilter);
+}
+
+function matchesPriorityFilter(item, priorityFilter) {
+  return matchesSelectFilter(item.priority, priorityFilter);
+}
+
+function matchesSearchText(item, searchText) {
+  const search = searchText?.trim().toLowerCase();
 
   if (!search) {
-    return statusMatches;
+    return true;
   }
 
   const haystack = [
@@ -92,12 +190,79 @@ function matchesFilter(item, filters) {
     item.customerName,
     item.crmAccountName,
     item.crmDealName,
+    item.booksInvoiceId,
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 
-  return statusMatches && haystack.includes(search);
+  return haystack.includes(search);
+}
+
+function matchesFilter(item, filters) {
+  const normalizedFilters = normalizeInboxFilters(filters);
+
+  return (
+    matchesStatusTab(item, normalizedFilters.statusFilter) &&
+    matchesSyncFilter(item, normalizedFilters.syncFilter) &&
+    matchesPaymentFilter(item, normalizedFilters.paymentFilter) &&
+    matchesPriorityFilter(item, normalizedFilters.priorityFilter) &&
+    matchesSearchText(item, normalizedFilters.searchText)
+  );
+}
+
+function compareText(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function compareDates(left, right) {
+  const leftTime = left ? new Date(left).getTime() : Number.POSITIVE_INFINITY;
+  const rightTime = right ? new Date(right).getTime() : Number.POSITIVE_INFINITY;
+  return leftTime - rightTime;
+}
+
+function sortInboxItems(items, filters = {}) {
+  const normalizedFilters = normalizeInboxFilters(filters);
+  const direction = normalizedFilters.sortDirection === "desc" ? -1 : 1;
+  const sorted = [...items].sort((left, right) => {
+    switch (normalizedFilters.sortBy) {
+      case "invoiceTotal":
+        return (toNumber(left.invoiceTotal) - toNumber(right.invoiceTotal)) * direction;
+      case "invoiceNumber":
+        return compareText(left.invoiceNumber, right.invoiceNumber) * direction;
+      case "customerName":
+        return compareText(left.customerName, right.customerName) * direction;
+      case "approvalStatus":
+        return compareText(left.approvalStatus, right.approvalStatus) * direction;
+      case "priority":
+        return compareText(left.priority, right.priority) * direction;
+      case "dueDate":
+      default:
+        return compareDates(left.dueDate, right.dueDate) * direction;
+    }
+  });
+
+  const start = (normalizedFilters.page - 1) * normalizedFilters.pageSize;
+  return sorted.slice(start, start + normalizedFilters.pageSize);
+}
+
+function buildInboxPayload(filters = {}) {
+  const normalized = normalizeInboxFilters(filters);
+
+  return {
+    statusFilter: normalized.statusFilter,
+    syncFilter: normalized.syncFilter,
+    paymentFilter: normalized.paymentFilter,
+    priorityFilter: normalized.priorityFilter,
+    searchText: normalized.searchText,
+    sortBy: normalized.sortBy,
+    sortDirection: normalized.sortDirection,
+    page: normalized.page,
+    pageSize: normalized.pageSize,
+  };
 }
 
 function buildSummary(items) {
@@ -149,6 +314,9 @@ function normalizeMockInboxItem(record) {
     approvalStatus: record.approvalStatus,
     priority: record.priority,
     crmAccountName: record.crmAccountName,
+    crmDealName: record.crmDealName,
+    syncStatus: record.syncStatus,
+    differenceFound: toBooleanLike(record.differenceFound, false),
   };
 }
 
@@ -166,12 +334,19 @@ function normalizeCreatorRecord(record) {
     currencyCode: getFirstString(record.Currency_Code, record.currencyCode, "USD"),
     dueDate: getFirstString(record.Due_Date, record.dueDate),
     invoiceDate: getFirstString(record.Invoice_Date, record.invoiceDate),
-    booksStatus: getFirstString(record.Books_Invoice_Status, record.booksStatus, record.status, "sent"),
+    booksStatus: getFirstString(
+      record.Books_Invoice_Status,
+      record.booksStatus,
+      record.status,
+      "sent",
+    ),
     paymentStatus: getFirstString(record.Books_Payment_Status, "unpaid"),
-    approvalStatus: normalizeStatus(record.Approval_Status),
+    approvalStatus: normalizeStatus(
+      getFirstString(record.Approval_Status, record.approvalStatus),
+    ),
     priority: getFirstString(record.Priority, "Medium"),
-    crmAccountName: getFirstString(record.CRM_Account_Name),
-    crmDealName: getFirstString(record.CRM_Deal_Name),
+    crmAccountName: getFirstString(record.CRM_Account_Name, record.crmAccountName),
+    crmDealName: getFirstString(record.CRM_Deal_Name, record.crmDealName),
     crmOwnerName: getFirstString(record.CRM_Owner_Name, record.Account_Manager),
     assignedReviewer: getFirstString(record.Assigned_Reviewer, "Unassigned"),
     exceptionReason: getFirstString(record.Exception_Reason),
@@ -386,13 +561,12 @@ function createMockService() {
   return {
     mode: "mock",
     async loadInbox(filters = {}) {
-      const filtered = mockStore
-        .filter((item) => matchesFilter(item, filters))
-        .map(normalizeMockInboxItem);
+      const allItems = mockStore.map(normalizeMockInboxItem);
+      const filtered = allItems.filter((item) => matchesFilter(item, filters));
 
       return {
-        items: filtered,
-        summary: buildSummary(mockStore.map(normalizeMockInboxItem)),
+        items: sortInboxItems(filtered, filters),
+        summary: buildSummary(allItems),
       };
     },
 
@@ -528,17 +702,48 @@ function createCreatorService(api, config) {
     mode: "creator",
 
     async loadInbox(filters = {}) {
+      if (config.loadInboxFunctionName) {
+        try {
+          const response = await tryInvokeCreatorFunction(
+            api,
+            config.loadInboxFunctionName,
+            buildInboxPayload(filters),
+          );
+          const result = response?.data?.result ?? response?.result ?? response?.data ?? response;
+          const rawItems = Array.isArray(result?.items)
+            ? result.items
+            : Array.isArray(result?.data?.items)
+              ? result.data.items
+              : null;
+
+          if (Array.isArray(rawItems)) {
+            const normalizedItems = rawItems.map(normalizeCreatorRecord);
+            const filteredItems = normalizedItems.filter((item) =>
+              matchesFilter(item, filters),
+            );
+
+            return {
+              items: sortInboxItems(filteredItems, filters),
+              summary: buildSummary(normalizedItems),
+            };
+          }
+        } catch (error) {
+          console.warn("Falling back to Creator report inbox load:", error);
+        }
+      }
+
       const recordsResponse = await api.getRecords(config.approvalRequestsReportName, {
         appName: config.creatorAppName,
       });
 
-      const items = (Array.isArray(recordsResponse?.data) ? recordsResponse.data : recordsResponse)
-        .map(normalizeCreatorRecord)
-        .filter((item) => matchesFilter(item, filters));
+      const normalizedItems = (
+        Array.isArray(recordsResponse?.data) ? recordsResponse.data : recordsResponse
+      ).map(normalizeCreatorRecord);
+      const items = normalizedItems.filter((item) => matchesFilter(item, filters));
 
       return {
-        items,
-        summary: buildSummary(items),
+        items: sortInboxItems(items, filters),
+        summary: buildSummary(normalizedItems),
       };
     },
 
@@ -855,6 +1060,11 @@ export function resolveInvoiceApprovalConfig(widgetParams = {}, initData = {}) {
     booksListFunctionName: getFirstString(widgetParams.booksListFunctionName, "listBooksInvoicesForApproval"),
     booksDetailFunctionName: getFirstString(widgetParams.booksDetailFunctionName, "getBooksInvoiceDetails"),
     crmContextFunctionName: getFirstString(widgetParams.crmContextFunctionName, "getCrmContextForInvoice"),
+    loadInboxFunctionName: getFirstString(
+      widgetParams.loadInboxFunctionName,
+      widgetParams.getApprovalInboxFunctionName,
+      "getApprovalInbox",
+    ),
     validateInvoiceApprovalFunctionName: getFirstString(
       widgetParams.validateInvoiceApprovalFunctionName,
       widgetParams.validateApprovalFunctionName,
