@@ -662,7 +662,13 @@ function getLatestAuditSummary(audit = []) {
 
 function mapApprovalRecord(record) {
   return {
-    approvalRecordId: String(getNestedValue(record, ["ID", "id"], "")),
+    approvalRecordId: String(
+      getNestedValue(
+        record,
+        ["ID", "id", "approvalRecordId", "recordId", "Approval_Request_ID"],
+        "",
+      ),
+    ),
     booksInvoiceId: String(
       getNestedValue(record, ["Books_Invoice_ID", "booksInvoiceId"], ""),
     ),
@@ -733,17 +739,28 @@ function mapApprovalRecord(record) {
     differenceSummary: String(
       getNestedValue(record, ["Difference_Summary", "differenceSummary"], ""),
     ),
-    crmAccountName: String(getNestedValue(record, ["CRM_Account_Name"], "")),
-    crmDealName: String(getNestedValue(record, ["CRM_Deal_Name"], "")),
+    crmAccountName: String(
+      getNestedValue(record, ["CRM_Account_Name", "crmAccountName"], ""),
+    ),
+    crmDealName: String(
+      getNestedValue(record, ["CRM_Deal_Name", "crmDealName"], ""),
+    ),
     accountOwner: String(
       getNestedValue(
         record,
-        ["CRM_Owner_Name", "CRM_Account_Owner", "Account_Owner", "Account_Manager"],
+        [
+          "CRM_Owner_Name",
+          "CRM_Account_Owner",
+          "Account_Owner",
+          "Account_Manager",
+          "accountOwner",
+          "accountManager",
+        ],
         "",
       ),
     ),
-    dealStage: String(getNestedValue(record, ["CRM_Deal_Stage"], "")),
-    riskLevel: String(getNestedValue(record, ["CRM_Risk_Level"], "")),
+    dealStage: String(getNestedValue(record, ["CRM_Deal_Stage", "dealStage"], "")),
+    riskLevel: String(getNestedValue(record, ["CRM_Risk_Level", "riskLevel"], "")),
     syncStatus: String(getNestedValue(record, ["Sync_Status", "syncStatus"], "Unknown")),
     lastActionBy: String(
       getNestedValue(record, ["Last_Action_By", "lastActionBy"], ""),
@@ -847,11 +864,14 @@ function mapApiInvoiceDetail(detail) {
   const approvalRecord = mapApprovalRecord(detailSource);
   const audit = toArray(detail?.audit).map(mapAuditRecord);
   const lastAuditSummary = getLatestAuditSummary(audit);
+  const resolvedApprovalRecordId =
+    approvalRecord.approvalRecordId ||
+    String(getNestedValue(detail, ["approvalRecordId", "recordId", "ID", "id"], ""));
 
   return {
-    approvalRecordId: approvalRecord.approvalRecordId,
+    approvalRecordId: resolvedApprovalRecordId,
     invoice: {
-      approvalRecordId: approvalRecord.approvalRecordId,
+      approvalRecordId: resolvedApprovalRecordId,
       booksInvoiceId: approvalRecord.booksInvoiceId,
       invoiceNumber: approvalRecord.invoiceNumber,
       customerName: approvalRecord.customerName,
