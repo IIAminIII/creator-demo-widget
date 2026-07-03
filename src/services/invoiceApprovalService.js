@@ -21,7 +21,14 @@ function normalizeStatus(value) {
 }
 
 function getRecordId(record) {
-  return record?.ID ?? record?.id ?? record?.recordId ?? record?.Approval_Request_ID ?? null;
+  return (
+    record?.ID ??
+    record?.id ??
+    record?.recordId ??
+    record?.approvalRecordId ??
+    record?.Approval_Request_ID ??
+    null
+  );
 }
 
 function toNumber(value) {
@@ -262,6 +269,8 @@ function buildInboxPayload(filters = {}) {
     sortDirection: normalized.sortDirection,
     page: normalized.page,
     pageSize: normalized.pageSize,
+    status: "All",
+    search: normalized.searchText,
   };
 }
 
@@ -323,8 +332,16 @@ function normalizeMockInboxItem(record) {
 function normalizeCreatorRecord(record) {
   return {
     approvalRecordId: String(getRecordId(record) ?? ""),
-    booksInvoiceId: getFirstString(record.Books_Invoice_ID, record.books_invoice_id),
-    invoiceNumber: getFirstString(record.Books_Invoice_Number, record.Invoice_Number),
+    booksInvoiceId: getFirstString(
+      record.Books_Invoice_ID,
+      record.books_invoice_id,
+      record.booksInvoiceId,
+    ),
+    invoiceNumber: getFirstString(
+      record.Books_Invoice_Number,
+      record.Invoice_Number,
+      record.invoiceNumber,
+    ),
     customerName: getFirstString(
       record.Books_Customer_Name,
       record.Customer_Name,
@@ -340,7 +357,11 @@ function normalizeCreatorRecord(record) {
       record.status,
       "sent",
     ),
-    paymentStatus: getFirstString(record.Books_Payment_Status, "unpaid"),
+    paymentStatus: getFirstString(
+      record.Books_Payment_Status,
+      record.paymentStatus,
+      "unpaid",
+    ),
     approvalStatus: normalizeStatus(
       getFirstString(record.Approval_Status, record.approvalStatus),
     ),

@@ -213,6 +213,9 @@ function buildInboxPayload(filters = {}) {
     sortDirection: normalized.sortDirection,
     page: normalized.page,
     pageSize: normalized.pageSize,
+    // Keep legacy inbox APIs working while the frontend applies the richer tabs.
+    status: "All",
+    search: normalized.searchText,
   };
 }
 
