@@ -44,6 +44,7 @@ export const APP_CONFIG = {
       loadCrmContext: getEnvValue("VITE_CREATOR_LOAD_CRM_CONTEXT_URL"),
       refreshBooksInvoiceSnapshot: getEnvValue(
         "VITE_CREATOR_REFRESH_BOOKS_INVOICE_SNAPSHOT_URL",
+        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/refreshBooksInvoiceSnapshot?publickey=rCXOYFbfUJM0tT49gstx3CBuZ",
       ),
       validateInvoiceApproval: getEnvValue("VITE_CREATOR_VALIDATE_INVOICE_APPROVAL_URL"),
       approveInvoice: getEnvValue("VITE_CREATOR_APPROVE_INVOICE_URL"),
