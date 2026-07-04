@@ -46,7 +46,10 @@ export const APP_CONFIG = {
         "VITE_CREATOR_REFRESH_BOOKS_INVOICE_SNAPSHOT_URL",
         "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/refreshBooksInvoiceSnapshot?publickey=rCXOYFbfUJM0tT49gstx3CBuZ",
       ),
-      validateInvoiceApproval: getEnvValue("VITE_CREATOR_VALIDATE_INVOICE_APPROVAL_URL"),
+      validateInvoiceApproval: getEnvValue(
+        "VITE_CREATOR_VALIDATE_INVOICE_APPROVAL_URL",
+        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/validateInvoiceApproval?publickey=XGyHdFjn9uwEezKWbsD6gbtdH",
+      ),
       approveInvoice: getEnvValue("VITE_CREATOR_APPROVE_INVOICE_URL"),
       rejectInvoice: getEnvValue("VITE_CREATOR_REJECT_INVOICE_URL"),
       requestClarification: getEnvValue("VITE_CREATOR_REQUEST_CLARIFICATION_URL"),
