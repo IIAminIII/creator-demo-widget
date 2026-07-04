@@ -46,6 +46,32 @@ function StatCard({ label, value, helper }) {
   );
 }
 
+function DashboardCard({ label, value, helper, tone = "neutral", onClick }) {
+  const toneStyles = {
+    success: "border-emerald-200 bg-emerald-50/70 text-emerald-900",
+    warning: "border-amber-200 bg-amber-50/80 text-amber-900",
+    danger: "border-rose-200 bg-rose-50/80 text-rose-900",
+    info: "border-sky-200 bg-sky-50/80 text-sky-900",
+    neutral: "border-slate-200 bg-white text-slate-900",
+  };
+
+  return (
+    <button
+      type="button"
+      className={`w-full rounded-3xl border px-4 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+        toneStyles[tone] ?? toneStyles.neutral
+      }`}
+      onClick={onClick}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold">{value}</p>
+      <p className="mt-1 text-sm text-slate-500">{helper}</p>
+    </button>
+  );
+}
+
 const DEFAULT_FILTERS = {
   statusFilter: "All",
   syncFilter: "All",
@@ -82,6 +108,54 @@ function createDefaultFilters(defaultStatus = "All") {
     ...DEFAULT_FILTERS,
     statusFilter: defaultStatus || "All",
   };
+}
+
+function createEmptyDashboardSummary() {
+  return {
+    approvalSummary: {
+      totalInvoices: 0,
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      needsClarification: 0,
+    },
+    syncSummary: {
+      synced: 0,
+      notSynced: 0,
+      reviewNeeded: 0,
+      manualReview: 0,
+      failed: 0,
+    },
+    paymentSummary: {
+      paid: 0,
+      unpaid: 0,
+      partiallyPaid: 0,
+      overdue: 0,
+      unknown: 0,
+    },
+    agingSummary: {
+      dueSoon: 0,
+      overdueDueDate: 0,
+    },
+    amountSummary: {
+      pendingAmount: 0,
+      approvedAmount: 0,
+      reviewAmount: 0,
+    },
+    prioritySummary: {
+      urgent: 0,
+      high: 0,
+    },
+    generatedAt: "",
+  };
+}
+
+function formatSummaryAmount(value, currencyCode = "USD") {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currencyCode,
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
 }
 
 function toInboxItemFromDetail(detail) {
@@ -139,6 +213,7 @@ export default function App() {
     approvedCount: 0,
     rejectedCount: 0,
   });
+  const [dashboardSummary, setDashboardSummary] = useState(createEmptyDashboardSummary);
   const [selectedRecordId, setSelectedRecordId] = useState("");
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [inboxLoading, setInboxLoading] = useState(true);
@@ -223,6 +298,35 @@ export default function App() {
     setFilters(createDefaultFilters(config.inboxDefaultStatusFilter));
   }
 
+  function applyDashboardFilters(nextFilterValues) {
+    setFilters((current) => ({
+      ...current,
+      statusFilter: "All",
+      syncFilter: "All",
+      paymentFilter: "All",
+      priorityFilter: "All",
+      ...nextFilterValues,
+      page: 1,
+    }));
+  }
+
+  async function loadDashboardSummary(options = {}) {
+    const silent = options.silent === true;
+
+    try {
+      const response = await service.loadDashboardSummary();
+      setDashboardSummary(response);
+    } catch (error) {
+      if (!silent) {
+        pushToast({
+          type: "error",
+          title: "Dashboard Refresh Failed",
+          message: getErrorMessage(error, "Failed to load the approval dashboard."),
+        });
+      }
+    }
+  }
+
   async function loadInbox(nextFilters = filters, options = {}) {
     const silent = options.silent === true;
     const preserveSelectedRecordId = options.preserveSelectedRecordId ?? selectedRecordId;
@@ -299,6 +403,10 @@ export default function App() {
   }, [service, config.inboxDefaultStatusFilter]);
 
   useEffect(() => {
+    loadDashboardSummary({ silent: true });
+  }, [service]);
+
+  useEffect(() => {
     loadInbox(filters, { preserveSelectedRecordId: selectedRecordId });
   }, [filters, service]);
 
@@ -361,6 +469,7 @@ export default function App() {
         );
       }
       await loadInbox(filters, { preserveSelectedRecordId: activeRecordId });
+      await loadDashboardSummary({ silent: true });
       if (refreshedInboxItem?.approvalRecordId) {
         setInboxItems((current) =>
           current.map((item) =>
@@ -479,6 +588,7 @@ export default function App() {
       }
 
       await loadInbox(filters, { preserveSelectedRecordId: activeRecordId });
+      await loadDashboardSummary({ silent: true });
 
       if (refreshedInboxItem?.approvalRecordId) {
         setInboxItems((current) =>
@@ -507,6 +617,77 @@ export default function App() {
   }
 
   const selectedSortValue = `${filters.sortBy}:${filters.sortDirection}`;
+  const summaryCurrencyCode =
+    inboxItems[0]?.currencyCode ||
+    selectedDetail?.currencyCode ||
+    selectedDetail?.invoice?.currencyCode ||
+    "USD";
+  const dashboardCards = [
+    {
+      label: "Pending Approvals",
+      value: dashboardSummary.approvalSummary.pending,
+      helper: "Invoices waiting for reviewer pickup.",
+      tone: "info",
+      onClick: () => applyDashboardFilters({ statusFilter: "Pending" }),
+    },
+    {
+      label: "Review Needed",
+      value: dashboardSummary.syncSummary.reviewNeeded,
+      helper: "Records still needing active reviewer attention.",
+      tone: "warning",
+      onClick: () => applyDashboardFilters({ syncFilter: "Review Needed" }),
+    },
+    {
+      label: "Manual Review",
+      value: dashboardSummary.syncSummary.manualReview,
+      helper: "Books sync or difference checks need manual confirmation.",
+      tone: "warning",
+      onClick: () => applyDashboardFilters({ syncFilter: "Manual Review" }),
+    },
+    {
+      label: "Failed Refresh",
+      value: dashboardSummary.syncSummary.failed,
+      helper: "Books refresh attempts that need another pass.",
+      tone: "danger",
+      onClick: () => applyDashboardFilters({ syncFilter: "Failed" }),
+    },
+    {
+      label: "Due Soon",
+      value: dashboardSummary.agingSummary.dueSoon,
+      helper: "Open invoices due within the next 3 days.",
+      tone: "info",
+      onClick: () =>
+        applyDashboardFilters({
+          statusFilter: "Pending",
+          sortBy: "dueDate",
+          sortDirection: "asc",
+        }),
+    },
+    {
+      label: "Overdue",
+      value: dashboardSummary.agingSummary.overdueDueDate,
+      helper: "Invoices with due dates already past.",
+      tone: "danger",
+      onClick: () => applyDashboardFilters({ paymentFilter: "Overdue" }),
+    },
+    {
+      label: "Pending Amount",
+      value: formatSummaryAmount(
+        dashboardSummary.amountSummary.pendingAmount,
+        summaryCurrencyCode,
+      ),
+      helper: "Current amount still blocked in the approval queue.",
+      tone: "neutral",
+      onClick: () => applyDashboardFilters({ statusFilter: "Pending" }),
+    },
+    {
+      label: "High Priority",
+      value: dashboardSummary.prioritySummary.high,
+      helper: "Urgent and high-priority invoices needing attention.",
+      tone: "warning",
+      onClick: () => applyDashboardFilters({ priorityFilter: "High" }),
+    },
+  ];
 
   if (initLoading) {
     return <LoadingSpinner label="Initializing invoice approval widget..." />;
@@ -563,6 +744,29 @@ export default function App() {
       </section>
 
       <section className="widget-surface p-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">Approval Dashboard</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Live overview of invoice approval workload, Books refresh health, and
+              payment status.
+            </p>
+          </div>
+          <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+            {dashboardSummary.generatedAt
+              ? `Generated ${new Date(dashboardSummary.generatedAt).toLocaleString()}`
+              : "Loading summary"}
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {dashboardCards.map((card) => (
+            <DashboardCard key={card.label} {...card} />
+          ))}
+        </div>
+      </section>
+
+      <section className="widget-surface p-5">
         <div className="flex flex-wrap gap-2">
           {STATUS_TABS.map((tab) => (
             <button
@@ -603,6 +807,7 @@ export default function App() {
             >
               <option value="All">All</option>
               <option value="Synced">Synced</option>
+              <option value="Review Needed">Review Needed</option>
               <option value="Manual Review">Manual Review</option>
               <option value="Failed">Failed</option>
               <option value="Difference Found">Difference Found</option>
@@ -748,6 +953,7 @@ export default function App() {
                 "listBooksInvoicesForApproval",
                 "getBooksInvoiceDetails",
                 "getCrmContextForInvoice",
+                "getApprovalDashboardSummary",
                 "validateInvoiceApproval",
                 "approveInvoice",
                 "rejectInvoice",

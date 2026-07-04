@@ -140,7 +140,8 @@ button {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-  margin-top: 14px;
+  margin-top: 0;
+  padding: 0 16px 16px;
 }
 
 .kpi-card,
@@ -156,6 +157,38 @@ button {
   min-height: 112px;
   padding: 12px 14px;
   border-radius: 18px;
+  text-align: left;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.kpi-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 44px rgba(25, 45, 86, 0.12);
+}
+
+.dashboard-panel {
+  margin-top: 14px;
+  border-radius: 22px;
+  overflow: hidden;
+}
+
+.kpi-card.kpi-info {
+  background: var(--info-soft);
+  border-color: rgba(43, 127, 211, 0.18);
+}
+
+.kpi-card.kpi-warning {
+  background: var(--warning-soft);
+  border-color: rgba(197, 133, 18, 0.16);
+}
+
+.kpi-card.kpi-danger {
+  background: var(--danger-soft);
+  border-color: rgba(208, 75, 75, 0.16);
+}
+
+.kpi-card.kpi-neutral {
+  background: #ffffff;
 }
 
 .kpi-label {

@@ -36,6 +36,10 @@ export const APP_CONFIG = {
     },
     customApis: {
       loadInbox: getEnvValue("VITE_CREATOR_GET_APPROVAL_INBOX_URL"),
+      loadDashboardSummary: getEnvValue(
+        "VITE_CREATOR_GET_APPROVAL_DASHBOARD_SUMMARY_URL",
+        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getApprovalDashboardSummary?publickey=QKkMpmbkxqutH7UQwfd9etr9a",
+      ),
       loadInvoiceDetail: getEnvValue("VITE_CREATOR_GET_APPROVAL_DETAIL_URL"),
       loadCrmContext: getEnvValue("VITE_CREATOR_LOAD_CRM_CONTEXT_URL"),
       refreshBooksInvoiceSnapshot: getEnvValue(
@@ -114,6 +118,10 @@ function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
           widgetParams.loadInboxFunctionName ||
           widgetParams.getApprovalInboxFunctionName ||
           baseConfig.creator.customApis.loadInbox,
+        loadDashboardSummary:
+          widgetParams.loadDashboardSummaryFunctionName ||
+          widgetParams.getApprovalDashboardSummaryFunctionName ||
+          baseConfig.creator.customApis.loadDashboardSummary,
         loadInvoiceDetail:
           widgetParams.loadInvoiceDetailFunctionName ||
           widgetParams.getApprovalDetailFunctionName ||

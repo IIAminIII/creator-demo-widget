@@ -25,6 +25,43 @@ const state = {
     rejectedCount: 0,
     highPriorityCount: 0,
   },
+  dashboardSummary: {
+    approvalSummary: {
+      totalInvoices: 0,
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      needsClarification: 0,
+    },
+    syncSummary: {
+      synced: 0,
+      notSynced: 0,
+      reviewNeeded: 0,
+      manualReview: 0,
+      failed: 0,
+    },
+    paymentSummary: {
+      paid: 0,
+      unpaid: 0,
+      partiallyPaid: 0,
+      overdue: 0,
+      unknown: 0,
+    },
+    agingSummary: {
+      dueSoon: 0,
+      overdueDueDate: 0,
+    },
+    amountSummary: {
+      pendingAmount: 0,
+      approvedAmount: 0,
+      reviewAmount: 0,
+    },
+    prioritySummary: {
+      urgent: 0,
+      high: 0,
+    },
+    generatedAt: "",
+  },
   selectedRecordId: "",
   selectedDetail: null,
   loadingInbox: false,
@@ -48,7 +85,14 @@ const STATUS_TABS = [
   "All",
 ];
 
-const SYNC_FILTERS = ["All", "Synced", "Manual Review", "Failed", "Difference Found"];
+const SYNC_FILTERS = [
+  "All",
+  "Synced",
+  "Review Needed",
+  "Manual Review",
+  "Failed",
+  "Difference Found",
+];
 const PAYMENT_FILTERS = ["All", "Paid", "Unpaid", "Partially Paid", "Overdue"];
 const PRIORITY_FILTERS = ["All", "Urgent", "High", "Medium", "Low"];
 const SORT_OPTIONS = [
@@ -77,6 +121,10 @@ function formatCurrency(amount, currencyCode) {
     currency: currencyCode || "USD",
     maximumFractionDigits: 0,
   }).format(Number(amount || 0));
+}
+
+function formatSummaryAmount(amount, currencyCode = "USD") {
+  return formatCurrency(amount, currencyCode);
 }
 
 function formatDate(value) {
@@ -443,6 +491,22 @@ function getInboxEmptyState() {
   };
 }
 
+function applyDashboardFilters(nextFilterValues = {}) {
+  state.filters = {
+    ...state.filters,
+    statusFilter: "All",
+    syncFilter: "All",
+    paymentFilter: "All",
+    priorityFilter: "All",
+    ...nextFilterValues,
+    page: 1,
+  };
+  syncToolbarInputs();
+  return loadInbox({ preserveSelectedRecordId: state.selectedRecordId }).then(() =>
+    loadDetail(state.selectedRecordId),
+  );
+}
+
 function removeToast(toast) {
   toast?.remove();
 }
@@ -570,48 +634,98 @@ function getErrorMessage(error, fallbackMessage) {
 }
 
 function renderKpis() {
-  const pendingCount =
-    state.summary.newCount +
-    state.summary.underReviewCount +
-    state.summary.clarificationCount;
-
+  const dashboard = state.dashboardSummary;
+  const currencyCode =
+    state.selectedDetail?.invoice?.currencyCode ||
+    state.inboxItems[0]?.currencyCode ||
+    "USD";
   const cards = [
     {
-      label: "Environment",
-      value: state.service?.mode === "creator" ? "Creator Live" : "Preview",
-      helper:
-        state.service?.mode === "creator"
-          ? "Creator APIs available."
-          : "Local data and simulated actions.",
+      label: "Pending Approvals",
+      value: String(dashboard.approvalSummary.pending),
+      helper: "Invoices waiting for reviewer pickup.",
+      className: "kpi-info",
+      filter: { statusFilter: "Pending" },
     },
     {
-      label: "Pending queue",
-      value: String(pendingCount),
-      helper: `${state.summary.total} records in the approval workspace`,
+      label: "Review Needed",
+      value: String(dashboard.syncSummary.reviewNeeded),
+      helper: "Records still needing active reviewer attention.",
+      className: "kpi-warning",
+      filter: { syncFilter: "Review Needed" },
     },
     {
-      label: "Needs clarification",
-      value: String(state.summary.clarificationCount),
-      helper: "Invoices blocked by missing data or reviewer questions",
+      label: "Manual Review",
+      value: String(dashboard.syncSummary.manualReview),
+      helper: "Books sync or difference checks need manual confirmation.",
+      className: "kpi-warning",
+      filter: { syncFilter: "Manual Review" },
     },
     {
-      label: "High priority",
-      value: String(state.summary.highPriorityCount),
-      helper: "Invoices needing close review before due date pressure rises",
+      label: "Failed Refresh",
+      value: String(dashboard.syncSummary.failed),
+      helper: "Books refresh attempts that need another pass.",
+      className: "kpi-danger",
+      filter: { syncFilter: "Failed" },
+    },
+    {
+      label: "Due Soon",
+      value: String(dashboard.agingSummary.dueSoon),
+      helper: "Open invoices due within the next 3 days.",
+      className: "kpi-info",
+      filter: { statusFilter: "Pending", sortBy: "dueDate", sortDirection: "asc" },
+    },
+    {
+      label: "Overdue",
+      value: String(dashboard.agingSummary.overdueDueDate),
+      helper: "Invoices with due dates already past.",
+      className: "kpi-danger",
+      filter: { paymentFilter: "Overdue" },
+    },
+    {
+      label: "Pending Amount",
+      value: formatSummaryAmount(dashboard.amountSummary.pendingAmount, currencyCode),
+      helper: "Current amount still blocked in the approval queue.",
+      className: "kpi-neutral",
+      filter: { statusFilter: "Pending" },
+    },
+    {
+      label: "High Priority",
+      value: String(dashboard.prioritySummary.high),
+      helper: "Urgent and high-priority invoices needing attention.",
+      className: "kpi-warning",
+      filter: { priorityFilter: "High" },
     },
   ];
 
   elements.kpiGrid.innerHTML = cards
     .map(
       (card) => `
-        <article class="kpi-card">
+        <button type="button" class="kpi-card ${card.className || ""}" data-kpi-filter='${escapeHtml(
+          JSON.stringify(card.filter || {}),
+        )}'>
           <div class="kpi-label">${escapeHtml(card.label)}</div>
           <div class="kpi-value">${escapeHtml(card.value)}</div>
           <div class="kpi-helper">${escapeHtml(card.helper)}</div>
-        </article>
+        </button>
       `,
     )
     .join("");
+
+  elements.kpiGrid.querySelectorAll("[data-kpi-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const filterJson = button.getAttribute("data-kpi-filter");
+      if (!filterJson) {
+        return;
+      }
+
+      try {
+        void applyDashboardFilters(JSON.parse(filterJson));
+      } catch (error) {
+        console.warn("Dashboard filter parse failed:", error);
+      }
+    });
+  });
 }
 
 function renderToolbarSummary() {
@@ -1322,6 +1436,7 @@ function wireDetailActions() {
         preserveSelectedRecordId: state.selectedRecordId,
         silent: true,
       });
+      await loadDashboardSummary({ silent: true });
       if (state.selectedRecordId) {
         await loadDetailWithOptions(state.selectedRecordId, { silent: true });
         syncInboxItemFromDetail(state.selectedDetail);
@@ -1520,6 +1635,23 @@ async function loadInbox(options = {}) {
   }
 }
 
+async function loadDashboardSummary(options = {}) {
+  const silent = options.silent === true;
+
+  try {
+    state.dashboardSummary = await state.service.loadDashboardSummary();
+  } catch (error) {
+    if (!silent) {
+      showToast(
+        getErrorMessage(error, "Failed to load the approval dashboard."),
+        "error",
+      );
+    }
+  } finally {
+    renderKpis();
+  }
+}
+
 async function loadDetail(recordId) {
   return loadDetailWithOptions(recordId, {});
 }
@@ -1617,6 +1749,7 @@ async function runAction(callback, successMessage = "Workflow action completed s
     state.selectedDetail = detail;
     state.guardrailCheck = null;
     await loadInbox({ preserveSelectedRecordId: activeRecordId });
+    await loadDashboardSummary({ silent: true });
     state.selectedRecordId = activeRecordId;
     if (activeRecordId) {
       state.selectedDetail = await state.service.loadInvoiceDetail(activeRecordId);
@@ -1753,6 +1886,7 @@ async function bootstrap() {
   renderToolbarSummary();
   renderInbox();
   renderDetail();
+  await loadDashboardSummary({ silent: true });
   await loadInbox();
   await loadDetail(state.selectedRecordId);
 }

@@ -75,6 +75,51 @@ function isOverdueInvoice(item) {
   return !["approved", "rejected"].includes(approvalStatus) && dueDate.getTime() < Date.now();
 }
 
+function isPendingApprovalItem(item = {}) {
+  const approvalStatus = normalizeApprovalStatus(item.approvalStatus).toLowerCase();
+  return ["new", "pending review"].includes(approvalStatus);
+}
+
+function isReviewNeededItem(item = {}) {
+  const approvalStatus = normalizeApprovalStatus(item.approvalStatus).toLowerCase();
+  const syncStatus = normalizeBadgeText(item.syncStatus);
+  return (
+    ["under review", "needs clarification"].includes(approvalStatus) ||
+    syncStatus.includes("review needed")
+  );
+}
+
+function isManualReviewItem(item = {}) {
+  const syncStatus = normalizeBadgeText(item.syncStatus);
+  return (
+    syncStatus.includes("manual") ||
+    syncStatus.includes("warning") ||
+    item.differenceFound === true
+  );
+}
+
+function isFailedRefreshItem(item = {}) {
+  return normalizeBadgeText(item.syncStatus).includes("failed");
+}
+
+function isHighPriorityItem(item = {}) {
+  return ["urgent", "high"].includes(normalizeBadgeText(item.priority));
+}
+
+function isDueSoonItem(item = {}) {
+  if (!item?.dueDate || isOverdueInvoice(item)) {
+    return false;
+  }
+
+  const dueDate = new Date(item.dueDate);
+  if (Number.isNaN(dueDate.getTime())) {
+    return false;
+  }
+
+  const daysUntilDue = (dueDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+  return daysUntilDue <= 3;
+}
+
 function matchesStatusTab(item, statusFilter) {
   if (!statusFilter || statusFilter === "All") {
     return true;
@@ -123,6 +168,8 @@ function matchesFilters(item, filters = {}) {
   if (
     normalizedFilters.syncFilter !== "All" &&
     !(
+      (normalizedFilters.syncFilter === "Review Needed" &&
+        isReviewNeededItem(item)) ||
       (normalizedFilters.syncFilter === "Difference Found" &&
         item.differenceFound === true) ||
       matchesSelectFilter(item.syncStatus, normalizedFilters.syncFilter)
@@ -234,6 +281,173 @@ function buildInboxPayload(filters = {}) {
   };
 }
 
+function normalizeDashboardSummaryNumber(value) {
+  return toNumber(value);
+}
+
+function buildDashboardSummaryFromItems(items = []) {
+  const summaryItems = Array.isArray(items) ? items : [];
+  const approvalSummary = {
+    totalInvoices: summaryItems.length,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    needsClarification: 0,
+  };
+  const syncSummary = {
+    synced: 0,
+    notSynced: 0,
+    reviewNeeded: 0,
+    manualReview: 0,
+    failed: 0,
+  };
+  const paymentSummary = {
+    paid: 0,
+    unpaid: 0,
+    partiallyPaid: 0,
+    overdue: 0,
+    unknown: 0,
+  };
+  const agingSummary = {
+    dueSoon: 0,
+    overdueDueDate: 0,
+  };
+  const amountSummary = {
+    pendingAmount: 0,
+    approvedAmount: 0,
+    reviewAmount: 0,
+  };
+  const prioritySummary = {
+    urgent: 0,
+    high: 0,
+  };
+
+  summaryItems.forEach((item) => {
+    const approvalStatus = normalizeApprovalStatus(item.approvalStatus);
+    const paymentStatus = normalizeBadgeText(item.paymentStatus);
+    const amount = toNumber(item.invoiceTotal);
+
+    if (isPendingApprovalItem(item)) {
+      approvalSummary.pending += 1;
+      amountSummary.pendingAmount += amount;
+    }
+
+    if (approvalStatus === "Approved") {
+      approvalSummary.approved += 1;
+      amountSummary.approvedAmount += amount;
+    }
+
+    if (approvalStatus === "Rejected") {
+      approvalSummary.rejected += 1;
+    }
+
+    if (approvalStatus === "Needs Clarification") {
+      approvalSummary.needsClarification += 1;
+    }
+
+    if (normalizeBadgeText(item.syncStatus).includes("synced")) {
+      syncSummary.synced += 1;
+    } else {
+      syncSummary.notSynced += 1;
+    }
+
+    if (isReviewNeededItem(item)) {
+      syncSummary.reviewNeeded += 1;
+      amountSummary.reviewAmount += amount;
+    }
+
+    if (isManualReviewItem(item)) {
+      syncSummary.manualReview += 1;
+    }
+
+    if (isFailedRefreshItem(item)) {
+      syncSummary.failed += 1;
+    }
+
+    if (paymentStatus === "paid") {
+      paymentSummary.paid += 1;
+    } else if (paymentStatus === "unpaid") {
+      paymentSummary.unpaid += 1;
+    } else if (paymentStatus.includes("partial")) {
+      paymentSummary.partiallyPaid += 1;
+    } else {
+      paymentSummary.unknown += 1;
+    }
+
+    if (isOverdueInvoice(item)) {
+      paymentSummary.overdue += 1;
+      agingSummary.overdueDueDate += 1;
+    } else if (isDueSoonItem(item)) {
+      agingSummary.dueSoon += 1;
+    }
+
+    if (normalizeBadgeText(item.priority) === "urgent") {
+      prioritySummary.urgent += 1;
+    }
+
+    if (isHighPriorityItem(item)) {
+      prioritySummary.high += 1;
+    }
+  });
+
+  return {
+    approvalSummary,
+    syncSummary,
+    paymentSummary,
+    agingSummary,
+    amountSummary,
+    prioritySummary,
+    generatedAt: nowIso(),
+  };
+}
+
+function normalizeDashboardSummary(summary = {}) {
+  const data =
+    summary?.data && typeof summary.data === "object"
+      ? summary.data
+      : summary;
+
+  return {
+    approvalSummary: {
+      totalInvoices: normalizeDashboardSummaryNumber(data?.approvalSummary?.totalInvoices),
+      pending: normalizeDashboardSummaryNumber(data?.approvalSummary?.pending),
+      approved: normalizeDashboardSummaryNumber(data?.approvalSummary?.approved),
+      rejected: normalizeDashboardSummaryNumber(data?.approvalSummary?.rejected),
+      needsClarification: normalizeDashboardSummaryNumber(
+        data?.approvalSummary?.needsClarification,
+      ),
+    },
+    syncSummary: {
+      synced: normalizeDashboardSummaryNumber(data?.syncSummary?.synced),
+      notSynced: normalizeDashboardSummaryNumber(data?.syncSummary?.notSynced),
+      reviewNeeded: normalizeDashboardSummaryNumber(data?.syncSummary?.reviewNeeded),
+      manualReview: normalizeDashboardSummaryNumber(data?.syncSummary?.manualReview),
+      failed: normalizeDashboardSummaryNumber(data?.syncSummary?.failed),
+    },
+    paymentSummary: {
+      paid: normalizeDashboardSummaryNumber(data?.paymentSummary?.paid),
+      unpaid: normalizeDashboardSummaryNumber(data?.paymentSummary?.unpaid),
+      partiallyPaid: normalizeDashboardSummaryNumber(data?.paymentSummary?.partiallyPaid),
+      overdue: normalizeDashboardSummaryNumber(data?.paymentSummary?.overdue),
+      unknown: normalizeDashboardSummaryNumber(data?.paymentSummary?.unknown),
+    },
+    agingSummary: {
+      dueSoon: normalizeDashboardSummaryNumber(data?.agingSummary?.dueSoon),
+      overdueDueDate: normalizeDashboardSummaryNumber(data?.agingSummary?.overdueDueDate),
+    },
+    amountSummary: {
+      pendingAmount: normalizeDashboardSummaryNumber(data?.amountSummary?.pendingAmount),
+      approvedAmount: normalizeDashboardSummaryNumber(data?.amountSummary?.approvedAmount),
+      reviewAmount: normalizeDashboardSummaryNumber(data?.amountSummary?.reviewAmount),
+    },
+    prioritySummary: {
+      urgent: normalizeDashboardSummaryNumber(data?.prioritySummary?.urgent),
+      high: normalizeDashboardSummaryNumber(data?.prioritySummary?.high),
+    },
+    generatedAt: normalizeText(data?.generatedAt) || nowIso(),
+  };
+}
+
 function getSummary(items) {
   const summary = {
     total: items.length,
@@ -318,6 +532,11 @@ function createMockService() {
 
   return {
     mode: "mock",
+    async loadDashboardSummary() {
+      return normalizeDashboardSummary(
+        buildDashboardSummaryFromItems(state.map(toInboxItem)),
+      );
+    },
     async init() {
       return {
         mode: "mock",
@@ -1433,6 +1652,33 @@ function createCreatorService(config, creator, widgetContext) {
         publicCustomApiMode: !creator,
         widgetContext,
       };
+    },
+
+    async loadDashboardSummary() {
+      if (customApis.loadDashboardSummary) {
+        try {
+          const response = await invokeCreatorCustomApi(customApis.loadDashboardSummary, {});
+          const normalized = normalizeApiEnvelope(response);
+          const result = normalized?.data || normalized;
+          if (!hasExplicitFailure(result)) {
+            return normalizeDashboardSummary(result);
+          }
+        } catch (error) {
+          console.warn("Falling back to Creator-derived dashboard summary:", error);
+        }
+      }
+
+      const records = await getCreatorRecords(
+        config,
+        creator,
+        config.creator.reports.inbox,
+      );
+      const allItems = records
+        .map(mapApprovalRecord)
+        .filter((record) => record.approvalRecordId)
+        .map(toInboxItemFromApprovalRecord);
+
+      return normalizeDashboardSummary(buildDashboardSummaryFromItems(allItems));
     },
 
     async loadInbox(filters = {}) {
