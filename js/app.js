@@ -9,6 +9,7 @@ const state = {
     syncFilter: "All",
     paymentFilter: "All",
     priorityFilter: "All",
+    reviewerFilter: "All Reviewers",
     searchText: "",
     sortBy: "dueDate",
     sortDirection: "asc",
@@ -62,6 +63,7 @@ const state = {
     },
     generatedAt: "",
   },
+  reviewerWorkload: [],
   selectedRecordId: "",
   selectedDetail: null,
   loadingInbox: false,
@@ -95,6 +97,7 @@ const SYNC_FILTERS = [
 ];
 const PAYMENT_FILTERS = ["All", "Paid", "Unpaid", "Partially Paid", "Overdue"];
 const PRIORITY_FILTERS = ["All", "Urgent", "High", "Medium", "Low"];
+const REVIEWER_FILTER_DEFAULT = "All Reviewers";
 const SORT_OPTIONS = [
   { value: "dueDate:asc", label: "Due date: soonest" },
   { value: "dueDate:desc", label: "Due date: latest" },
@@ -498,6 +501,7 @@ function applyDashboardFilters(nextFilterValues = {}) {
     syncFilter: "All",
     paymentFilter: "All",
     priorityFilter: "All",
+    reviewerFilter: REVIEWER_FILTER_DEFAULT,
     ...nextFilterValues,
     page: 1,
   };
@@ -726,6 +730,82 @@ function renderKpis() {
       }
     });
   });
+}
+
+function getReviewerFilterOptions() {
+  const options = [
+    { value: REVIEWER_FILTER_DEFAULT, label: REVIEWER_FILTER_DEFAULT },
+    { value: "Unassigned", label: "Unassigned" },
+  ];
+  const seen = new Set();
+
+  state.reviewerWorkload.forEach((entry) => {
+    const email = normalizeText(entry.reviewerEmail);
+    if (!email || seen.has(email)) {
+      return;
+    }
+    seen.add(email);
+    options.push({
+      value: email,
+      label: `${entry.reviewerName || email} (${email})`,
+    });
+  });
+
+  return options;
+}
+
+function renderReviewerWorkload() {
+  if (!elements.reviewerWorkload) {
+    return;
+  }
+
+  const rows = state.reviewerWorkload.length
+    ? state.reviewerWorkload
+        .map(
+          (entry) => `
+            <tr>
+              <td>${escapeHtml(entry.reviewerName || "Unassigned")}</td>
+              <td>${escapeHtml(entry.reviewerEmail || "Not available")}</td>
+              <td>${escapeHtml(entry.assignedCount)}</td>
+              <td>${escapeHtml(entry.pendingCount)}</td>
+              <td>${escapeHtml(entry.needsClarificationCount)}</td>
+              <td>${escapeHtml(
+                formatSummaryAmount(
+                  entry.reviewAmount,
+                  state.selectedDetail?.invoice?.currencyCode ||
+                    state.inboxItems[0]?.currencyCode ||
+                    "USD",
+                ),
+              )}</td>
+              <td>${escapeHtml(entry.unassignedCount)}</td>
+            </tr>
+          `,
+        )
+        .join("")
+    : `
+      <tr>
+        <td colspan="7">No reviewer workload data is available yet.</td>
+      </tr>
+    `;
+
+  elements.reviewerWorkload.innerHTML = `
+    <div class="table-wrap">
+      <table class="snapshot-table">
+        <thead>
+          <tr>
+            <th>Reviewer</th>
+            <th>Email</th>
+            <th>Assigned</th>
+            <th>Pending</th>
+            <th>Needs Clarification</th>
+            <th>Review Amount</th>
+            <th>Unassigned</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 function renderToolbarSummary() {
@@ -1166,6 +1246,59 @@ function renderDetail() {
       </article>
 
       <article class="detail-card action-card">
+        <div class="section-tag tag-creator">Reviewer Assignment</div>
+        <h3>Reviewer Assignment</h3>
+        <p>Assign or reassign this invoice to the right reviewer.</p>
+        <div class="meta-grid">
+          <div class="mini-card">
+            <div class="mini-label">Assigned Reviewer</div>
+            <div class="mini-value">${escapeHtml(approval.assignedReviewer || "Unassigned")}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Reviewer Email</div>
+            <div class="mini-value">${escapeHtml(approval.reviewerEmail || "Not available")}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Assignment Status</div>
+            <div class="mini-value">${escapeHtml(approval.assignmentStatus || "Unassigned")}</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Assigned Date</div>
+            <div class="mini-value">${escapeHtml(formatDate(approval.assignedDate))}</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-label">Assignment Notes</div>
+          <div class="mini-value">${escapeHtml(approval.assignmentNote || "No assignment note yet.")}</div>
+        </div>
+        <div class="action-grid">
+          <label>
+            <span>Reviewer Name</span>
+            <input id="assign-reviewer-name-input" type="text" value="${escapeHtml(
+              approval.assignedReviewer || "",
+            )}" />
+          </label>
+          <label>
+            <span>Reviewer Email</span>
+            <input id="assign-reviewer-email-input" type="email" value="${escapeHtml(
+              approval.reviewerEmail || "",
+            )}" />
+          </label>
+        </div>
+        <label>
+          <span>Assignment Note</span>
+          <textarea id="assignment-note-input" placeholder="Why is this reviewer being assigned?">${escapeHtml(
+            approval.assignmentNote || "",
+          )}</textarea>
+        </label>
+        <div class="action-buttons">
+          <button type="button" class="secondary-button" id="assign-reviewer-button">
+            Assign Reviewer
+          </button>
+        </div>
+      </article>
+
+      <article class="detail-card action-card">
         <div class="section-tag tag-creator">Approval Guardrails</div>
         <h3>Approval Guardrails</h3>
         <p>
@@ -1402,10 +1535,14 @@ function wireDetailActions() {
   const reviewerInput = document.getElementById("reviewer-input");
   const commentInput = document.getElementById("comment-input");
   const exceptionInput = document.getElementById("exception-input");
+  const assignReviewerNameInput = document.getElementById("assign-reviewer-name-input");
+  const assignReviewerEmailInput = document.getElementById("assign-reviewer-email-input");
+  const assignmentNoteInput = document.getElementById("assignment-note-input");
   const refreshButton = document.getElementById("refresh-detail-button");
   const checkApprovalSafetyButton = document.getElementById(
     "check-approval-safety-button",
   );
+  const assignReviewerButton = document.getElementById("assign-reviewer-button");
   const approveButton = document.getElementById("approve-button");
   const rejectButton = document.getElementById("reject-button");
   const clarifyButton = document.getElementById("clarify-button");
@@ -1416,6 +1553,43 @@ function wireDetailActions() {
     reviewer: reviewerInput.value.trim() || getReviewerFallback(),
     comment: commentInput.value.trim(),
     exceptionReason: exceptionInput.value.trim(),
+  });
+
+  assignReviewerButton?.addEventListener("click", async () => {
+    if (!state.selectedRecordId || state.busyAction) {
+      return;
+    }
+
+    const reviewerName = assignReviewerNameInput?.value.trim() || "";
+    const reviewerEmail = assignReviewerEmailInput?.value.trim() || "";
+    const assignmentNote = assignmentNoteInput?.value.trim() || "";
+
+    if (!reviewerName) {
+      showToast("Reviewer name is required before assignment.", "error");
+      return;
+    }
+
+    state.busyAction = true;
+
+    try {
+      state.selectedDetail = await state.service.assignInvoiceReviewer(
+        state.selectedRecordId,
+        {
+          reviewerName,
+          reviewerEmail,
+          assignmentNote,
+        },
+      );
+      await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
+      await loadDashboardSummary({ silent: true });
+      await loadReviewerWorkload({ silent: true });
+      renderDetail();
+      showToast("Reviewer assignment updated successfully.");
+    } catch (error) {
+      showToast(getErrorMessage(error, "Failed to assign reviewer."), "error");
+    } finally {
+      state.busyAction = false;
+    }
   });
 
   refreshButton?.addEventListener("click", async () => {
@@ -1437,6 +1611,7 @@ function wireDetailActions() {
         silent: true,
       });
       await loadDashboardSummary({ silent: true });
+      await loadReviewerWorkload({ silent: true });
       if (state.selectedRecordId) {
         await loadDetailWithOptions(state.selectedRecordId, { silent: true });
         syncInboxItemFromDetail(state.selectedDetail);
@@ -1590,6 +1765,28 @@ function syncToolbarInputs() {
     elements.priorityFilter.value = state.filters.priorityFilter;
   }
 
+  if (elements.reviewerFilter) {
+    const currentOptions = Array.from(elements.reviewerFilter.options).map(
+      (option) => option.value,
+    );
+    const desiredOptions = getReviewerFilterOptions();
+
+    if (
+      currentOptions.length !== desiredOptions.length ||
+      currentOptions.some((value, index) => value !== desiredOptions[index].value)
+    ) {
+      elements.reviewerFilter.innerHTML = "";
+      desiredOptions.forEach((optionConfig) => {
+        const option = document.createElement("option");
+        option.value = optionConfig.value;
+        option.textContent = optionConfig.label;
+        elements.reviewerFilter.appendChild(option);
+      });
+    }
+
+    elements.reviewerFilter.value = state.filters.reviewerFilter;
+  }
+
   if (elements.sortFilter) {
     elements.sortFilter.value = `${state.filters.sortBy}:${state.filters.sortDirection}`;
   }
@@ -1649,6 +1846,24 @@ async function loadDashboardSummary(options = {}) {
     }
   } finally {
     renderKpis();
+  }
+}
+
+async function loadReviewerWorkload(options = {}) {
+  const silent = options.silent === true;
+
+  try {
+    state.reviewerWorkload = await state.service.loadReviewerWorkload();
+  } catch (error) {
+    if (!silent) {
+      showToast(
+        getErrorMessage(error, "Failed to load reviewer workload."),
+        "error",
+      );
+    }
+  } finally {
+    renderReviewerWorkload();
+    syncToolbarInputs();
   }
 }
 
@@ -1750,6 +1965,7 @@ async function runAction(callback, successMessage = "Workflow action completed s
     state.guardrailCheck = null;
     await loadInbox({ preserveSelectedRecordId: activeRecordId });
     await loadDashboardSummary({ silent: true });
+    await loadReviewerWorkload({ silent: true });
     state.selectedRecordId = activeRecordId;
     if (activeRecordId) {
       state.selectedDetail = await state.service.loadInvoiceDetail(activeRecordId);
@@ -1786,6 +2002,13 @@ function bindToolbar() {
     option.value = value;
     option.textContent = value;
     elements.priorityFilter.appendChild(option);
+  });
+
+  getReviewerFilterOptions().forEach((optionConfig) => {
+    const option = document.createElement("option");
+    option.value = optionConfig.value;
+    option.textContent = optionConfig.label;
+    elements.reviewerFilter.appendChild(option);
   });
 
   SORT_OPTIONS.forEach((optionConfig) => {
@@ -1825,6 +2048,13 @@ function bindToolbar() {
     await loadDetail(state.selectedRecordId);
   });
 
+  elements.reviewerFilter.addEventListener("change", async (event) => {
+    state.filters.reviewerFilter = event.target.value;
+    state.filters.page = 1;
+    await loadInbox({ preserveSelectedRecordId: state.selectedRecordId });
+    await loadDetail(state.selectedRecordId);
+  });
+
   elements.sortFilter.addEventListener("change", async (event) => {
     const [sortBy, sortDirection] = String(event.target.value || "dueDate:asc").split(":");
     state.filters.sortBy = sortBy || "dueDate";
@@ -1840,6 +2070,7 @@ function bindToolbar() {
       syncFilter: "All",
       paymentFilter: "All",
       priorityFilter: "All",
+      reviewerFilter: REVIEWER_FILTER_DEFAULT,
       searchText: "",
       sortBy: "dueDate",
       sortDirection: "asc",
@@ -1860,10 +2091,12 @@ function bindToolbar() {
 
 async function bootstrap() {
   elements.kpiGrid = document.getElementById("kpi-grid");
+  elements.reviewerWorkload = document.getElementById("reviewer-workload");
   elements.searchFilter = document.getElementById("search-filter");
   elements.syncFilter = document.getElementById("sync-filter");
   elements.paymentFilter = document.getElementById("payment-filter");
   elements.priorityFilter = document.getElementById("priority-filter");
+  elements.reviewerFilter = document.getElementById("reviewer-filter");
   elements.sortFilter = document.getElementById("sort-filter");
   elements.resetFiltersButton = document.getElementById("reset-filters-button");
   elements.refreshButton = document.getElementById("refresh-button");
@@ -1883,10 +2116,12 @@ async function bootstrap() {
   bindToolbar();
   startAutoRefresh();
   renderKpis();
+  renderReviewerWorkload();
   renderToolbarSummary();
   renderInbox();
   renderDetail();
   await loadDashboardSummary({ silent: true });
+  await loadReviewerWorkload({ silent: true });
   await loadInbox();
   await loadDetail(state.selectedRecordId);
 }

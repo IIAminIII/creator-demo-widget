@@ -90,6 +90,7 @@ function normalizeInboxFilters(filters = {}) {
     syncFilter: normalizeFilterValue(filters.syncFilter, "All"),
     paymentFilter: normalizeFilterValue(filters.paymentFilter, "All"),
     priorityFilter: normalizeFilterValue(filters.priorityFilter, "All"),
+    reviewerFilter: normalizeFilterValue(filters.reviewerFilter, "All Reviewers"),
     searchText: getFirstString(filters.searchText, filters.search),
     sortBy: getFirstString(filters.sortBy, "dueDate"),
     sortDirection: getFirstString(filters.sortDirection, "asc"),
@@ -234,6 +235,21 @@ function matchesPriorityFilter(item, priorityFilter) {
   return matchesSelectFilter(item.priority, priorityFilter);
 }
 
+function matchesReviewerFilter(item, reviewerFilter) {
+  if (!reviewerFilter || reviewerFilter === "All" || reviewerFilter === "All Reviewers") {
+    return true;
+  }
+
+  const assignedReviewer = getFirstString(item.assignedReviewer, "Unassigned");
+  const reviewerEmail = getFirstString(item.reviewerEmail);
+
+  if (reviewerFilter === "Unassigned") {
+    return normalizeBadgeValue(assignedReviewer) === "unassigned" && !reviewerEmail;
+  }
+
+  return normalizeBadgeValue(reviewerEmail) === normalizeBadgeValue(reviewerFilter);
+}
+
 function matchesSearchText(item, searchText) {
   const search = searchText?.trim().toLowerCase();
 
@@ -263,6 +279,7 @@ function matchesFilter(item, filters) {
     matchesSyncFilter(item, normalizedFilters.syncFilter) &&
     matchesPaymentFilter(item, normalizedFilters.paymentFilter) &&
     matchesPriorityFilter(item, normalizedFilters.priorityFilter) &&
+    matchesReviewerFilter(item, normalizedFilters.reviewerFilter) &&
     matchesSearchText(item, normalizedFilters.searchText)
   );
 }
@@ -328,6 +345,8 @@ function buildInboxPayload(filters = {}) {
     syncFilter: "All",
     paymentFilter: "All",
     priorityFilter: "All",
+    reviewerFilter:
+      normalized.reviewerFilter === "All Reviewers" ? "All" : normalized.reviewerFilter,
     searchText: normalized.searchText,
     sortBy: normalized.sortBy,
     sortDirection: normalized.sortDirection,
@@ -600,6 +619,10 @@ function normalizeCreatorRecord(record) {
     crmDealName: getFirstString(record.CRM_Deal_Name, record.crmDealName),
     crmOwnerName: getFirstString(record.CRM_Owner_Name, record.Account_Manager),
     assignedReviewer: getFirstString(record.Assigned_Reviewer, "Unassigned"),
+    reviewerEmail: getFirstString(record.Reviewer_Email, record.reviewerEmail),
+    assignmentStatus: getFirstString(record.Assignment_Status, record.assignmentStatus),
+    assignedDate: getFirstString(record.Assigned_Date, record.assignedDate),
+    assignmentNote: getFirstString(record.Assignment_Note, record.assignmentNote),
     exceptionReason: getFirstString(record.Exception_Reason),
     reviewerNotes: getFirstString(record.Reviewer_Notes),
     decisionDate: getFirstString(record.Approval_Decision_Date),
@@ -625,6 +648,28 @@ function normalizeCreatorRecord(record) {
       record.differenceSummary,
     ),
     syncStatus: getFirstString(record.Sync_Status, record.syncStatus),
+  };
+}
+
+function normalizeReviewerWorkloadRecord(record = {}) {
+  return {
+    reviewerName: getFirstString(
+      record.reviewerName,
+      record.reviewer,
+      record.Reviewer_Name,
+      "Unassigned",
+    ),
+    reviewerEmail: getFirstString(
+      record.reviewerEmail,
+      record.Reviewer_Email,
+    ),
+    assignedCount: toNumber(record.assignedCount ?? record.Assigned_Count),
+    pendingCount: toNumber(record.pendingCount ?? record.Pending_Count),
+    needsClarificationCount: toNumber(
+      record.needsClarificationCount ?? record.Needs_Clarification_Count,
+    ),
+    reviewAmount: toNumber(record.reviewAmount ?? record.Review_Amount),
+    unassignedCount: toNumber(record.unassignedCount ?? record.Unassigned_Count),
   };
 }
 
@@ -685,6 +730,52 @@ function addMockAudit(record, eventType, summary, actor) {
   record.lastActionDate = audit.createdAt;
   record.lastEventType = audit.eventType;
   return audit;
+}
+
+function buildMockReviewerWorkload(store = []) {
+  const workloadMap = new Map();
+  let unassignedCount = 0;
+
+  store.forEach((record) => {
+    const reviewerName = getFirstString(record.assignedReviewer, "Unassigned");
+    const reviewerEmail = getFirstString(record.reviewerEmail);
+    const pendingLike = !["approved", "rejected"].includes(
+      normalizeBadgeValue(record.approvalStatus),
+    );
+
+    if (normalizeBadgeValue(reviewerName) === "unassigned" && !reviewerEmail) {
+      if (pendingLike) {
+        unassignedCount += 1;
+      }
+      return;
+    }
+
+    const key = reviewerEmail || reviewerName;
+    const existing = workloadMap.get(key) || {
+      reviewerName,
+      reviewerEmail,
+      assignedCount: 0,
+      pendingCount: 0,
+      needsClarificationCount: 0,
+      reviewAmount: 0,
+      unassignedCount: 0,
+    };
+
+    existing.assignedCount += 1;
+    if (pendingLike) {
+      existing.pendingCount += 1;
+      existing.reviewAmount += toNumber(record.invoiceTotal);
+    }
+    if (normalizeBadgeValue(record.approvalStatus) === "needs clarification") {
+      existing.needsClarificationCount += 1;
+    }
+
+    workloadMap.set(key, existing);
+  });
+
+  return Array.from(workloadMap.values())
+    .map((entry) => ({ ...entry, unassignedCount }))
+    .sort((left, right) => right.pendingCount - left.pendingCount);
 }
 
 function buildGuardrailValidationFromSource(source = {}, fallback = {}) {
@@ -814,6 +905,9 @@ function createMockService() {
     async loadDashboardSummary() {
       return normalizeDashboardSummary(buildDashboardSummaryFromItems(mockStore));
     },
+    async loadReviewerWorkload() {
+      return buildMockReviewerWorkload(mockStore);
+    },
     async loadInbox(filters = {}) {
       const allItems = mockStore.map(normalizeMockInboxItem);
       const filtered = allItems.filter((item) => matchesFilter(item, filters));
@@ -864,6 +958,36 @@ function createMockService() {
 
       record.lastBooksSyncAt = new Date().toISOString();
       addMockAudit(record, "Books Snapshot Refreshed", "Invoice snapshot refreshed from the local preview source.", "System");
+
+      return clone(record);
+    },
+
+    async assignInvoiceReviewer(recordId, payload) {
+      const record = mockStore.find((item) => item.approvalRecordId === recordId);
+
+      if (!record) {
+        throw new Error("Approval record not found.");
+      }
+
+      const reviewerName = getFirstString(payload?.reviewerName, payload?.reviewer, "Reviewer");
+      const reviewerEmail = getFirstString(payload?.reviewerEmail);
+      const assignmentNote = getFirstString(payload?.assignmentNote);
+
+      record.assignedReviewer = reviewerName;
+      record.reviewerEmail = reviewerEmail;
+      record.assignmentStatus = "Assigned";
+      record.assignedDate = new Date().toISOString();
+      record.assignmentNote = assignmentNote;
+      if (assignmentNote) {
+        record.reviewerNotes = assignmentNote;
+      }
+
+      addMockAudit(
+        record,
+        "Comment Added",
+        `Invoice assigned to ${reviewerName}${reviewerEmail ? ` (${reviewerEmail})` : ""}.`,
+        reviewerName,
+      );
 
       return clone(record);
     },
@@ -977,6 +1101,42 @@ function createCreatorService(api, config) {
         Array.isArray(recordsResponse?.data) ? recordsResponse.data : recordsResponse
       ).map(normalizeCreatorRecord);
       return normalizeDashboardSummary(buildDashboardSummaryFromItems(normalizedItems));
+    },
+
+    async loadReviewerWorkload() {
+      if (config.loadReviewerWorkloadFunctionName) {
+        try {
+          const response = await tryInvokeCreatorFunction(
+            api,
+            config.loadReviewerWorkloadFunctionName,
+            {},
+          );
+          const result = response?.data?.result ?? response?.result ?? response?.data ?? response;
+          const rawItems = Array.isArray(result)
+            ? result
+            : Array.isArray(result?.items)
+              ? result.items
+              : Array.isArray(result?.data?.items)
+                ? result.data.items
+                : Array.isArray(result?.reviewers)
+                  ? result.reviewers
+                  : [];
+
+          if (rawItems.length) {
+            return rawItems.map(normalizeReviewerWorkloadRecord);
+          }
+        } catch (error) {
+          console.warn("Falling back to Creator-derived reviewer workload:", error);
+        }
+      }
+
+      const recordsResponse = await api.getRecords(config.approvalRequestsReportName, {
+        appName: config.creatorAppName,
+      });
+      const normalizedItems = (
+        Array.isArray(recordsResponse?.data) ? recordsResponse.data : recordsResponse
+      ).map(normalizeCreatorRecord);
+      return buildMockReviewerWorkload(normalizedItems);
     },
 
     async loadInbox(filters = {}) {
@@ -1176,6 +1336,43 @@ function createCreatorService(api, config) {
       return this.loadInvoiceDetail(recordId);
     },
 
+    async assignInvoiceReviewer(recordId, payload) {
+      const assignmentPayload = {
+        approvalRecordId: recordId,
+        reviewerName: getFirstString(payload?.reviewerName, payload?.reviewer, "Reviewer"),
+        reviewerEmail: getFirstString(payload?.reviewerEmail),
+        assignmentNote: getFirstString(payload?.assignmentNote),
+      };
+
+      if (config.assignInvoiceReviewerFunctionName) {
+        const response = await tryInvokeCreatorFunction(
+          api,
+          config.assignInvoiceReviewerFunctionName,
+          assignmentPayload,
+        );
+        const result = response?.data?.result ?? response?.result ?? response?.data ?? response;
+
+        if (result?.ok === false) {
+          throw new Error(result?.message || "Failed to assign reviewer.");
+        }
+
+        return this.loadInvoiceDetail(recordId);
+      }
+
+      await api.updateRecord(config.approvalRequestsReportName, recordId, {
+        appName: config.creatorAppName,
+        data: {
+          Assigned_Reviewer: assignmentPayload.reviewerName,
+          Reviewer_Email: assignmentPayload.reviewerEmail,
+          Assignment_Status: "Assigned",
+          Assigned_Date: new Date().toISOString(),
+          Assignment_Note: assignmentPayload.assignmentNote,
+        },
+      });
+
+      return this.loadInvoiceDetail(recordId);
+    },
+
     async rejectInvoice(recordId, payload) {
       const updates = {
         Approval_Status: "Rejected",
@@ -1352,6 +1549,15 @@ export function resolveInvoiceApprovalConfig(widgetParams = {}, initData = {}) {
       widgetParams.validateInvoiceApprovalFunctionName,
       widgetParams.validateApprovalFunctionName,
       "validateInvoiceApproval",
+    ),
+    loadReviewerWorkloadFunctionName: getFirstString(
+      widgetParams.loadReviewerWorkloadFunctionName,
+      widgetParams.getReviewerWorkloadSummaryFunctionName,
+      "getReviewerWorkloadSummary",
+    ),
+    assignInvoiceReviewerFunctionName: getFirstString(
+      widgetParams.assignInvoiceReviewerFunctionName,
+      "assignInvoiceReviewer",
     ),
     approvalActionFunctionName: getFirstString(widgetParams.approvalActionFunctionName, "approveInvoice"),
     inboxDefaultStatusFilter: getFirstString(widgetParams.inboxDefaultStatusFilter, "All"),

@@ -40,6 +40,10 @@ export const APP_CONFIG = {
         "VITE_CREATOR_GET_APPROVAL_DASHBOARD_SUMMARY_URL",
         "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getApprovalDashboardSummary?publickey=QKkMpmbkxqutH7UQwfd9etr9a",
       ),
+      loadReviewerWorkload: getEnvValue(
+        "VITE_CREATOR_GET_REVIEWER_WORKLOAD_SUMMARY_URL",
+        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getReviewerWorkloadSummary?publickey=x13yOP1qhqaX7S0rH7Ou8OV9k",
+      ),
       loadInvoiceDetail: getEnvValue("VITE_CREATOR_GET_APPROVAL_DETAIL_URL"),
       loadCrmContext: getEnvValue("VITE_CREATOR_LOAD_CRM_CONTEXT_URL"),
       refreshBooksInvoiceSnapshot: getEnvValue(
@@ -49,6 +53,10 @@ export const APP_CONFIG = {
       validateInvoiceApproval: getEnvValue(
         "VITE_CREATOR_VALIDATE_INVOICE_APPROVAL_URL",
         "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/validateInvoiceApproval?publickey=XGyHdFjn9uwEezKWbsD6gbtdH",
+      ),
+      assignInvoiceReviewer: getEnvValue(
+        "VITE_CREATOR_ASSIGN_INVOICE_REVIEWER_URL",
+        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/assignInvoiceReviewer?publickey=Khfzv7BuFEqrBbQYQ2Jx0tORH",
       ),
       approveInvoice: getEnvValue("VITE_CREATOR_APPROVE_INVOICE_URL"),
       rejectInvoice: getEnvValue("VITE_CREATOR_REJECT_INVOICE_URL"),
@@ -126,6 +134,10 @@ function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
           widgetParams.loadDashboardSummaryFunctionName ||
           widgetParams.getApprovalDashboardSummaryFunctionName ||
           baseConfig.creator.customApis.loadDashboardSummary,
+        loadReviewerWorkload:
+          widgetParams.loadReviewerWorkloadFunctionName ||
+          widgetParams.getReviewerWorkloadSummaryFunctionName ||
+          baseConfig.creator.customApis.loadReviewerWorkload,
         loadInvoiceDetail:
           widgetParams.loadInvoiceDetailFunctionName ||
           widgetParams.getApprovalDetailFunctionName ||
@@ -142,6 +154,9 @@ function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
           widgetParams.validateInvoiceApprovalFunctionName ||
           widgetParams.validateApprovalFunctionName ||
           baseConfig.creator.customApis.validateInvoiceApproval,
+        assignInvoiceReviewer:
+          widgetParams.assignInvoiceReviewerFunctionName ||
+          baseConfig.creator.customApis.assignInvoiceReviewer,
         approveInvoice:
           widgetParams.approveInvoiceFunctionName ||
           baseConfig.creator.customApis.approveInvoice,

@@ -77,6 +77,7 @@ const DEFAULT_FILTERS = {
   syncFilter: "All",
   paymentFilter: "All",
   priorityFilter: "All",
+  reviewerFilter: "All Reviewers",
   searchText: "",
   sortBy: "dueDate",
   sortDirection: "asc",
@@ -175,6 +176,8 @@ function toInboxItemFromDetail(detail) {
     paymentStatus: detail.paymentStatus || "Unknown",
     approvalStatus: detail.approvalStatus || "New",
     priority: detail.priority || "Medium",
+    assignedReviewer: detail.assignedReviewer || "Unassigned",
+    reviewerEmail: detail.reviewerEmail || "",
     crmAccountName: detail.crmAccountName || detail.crmContext?.accountName || "",
     crmDealName: detail.crmDealName || detail.crmContext?.dealName || "",
     syncStatus: detail.syncStatus || "Unknown",
@@ -214,6 +217,7 @@ export default function App() {
     rejectedCount: 0,
   });
   const [dashboardSummary, setDashboardSummary] = useState(createEmptyDashboardSummary);
+  const [reviewerWorkload, setReviewerWorkload] = useState([]);
   const [selectedRecordId, setSelectedRecordId] = useState("");
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [inboxLoading, setInboxLoading] = useState(true);
@@ -305,6 +309,7 @@ export default function App() {
       syncFilter: "All",
       paymentFilter: "All",
       priorityFilter: "All",
+      reviewerFilter: "All Reviewers",
       ...nextFilterValues,
       page: 1,
     }));
@@ -322,6 +327,23 @@ export default function App() {
           type: "error",
           title: "Dashboard Refresh Failed",
           message: getErrorMessage(error, "Failed to load the approval dashboard."),
+        });
+      }
+    }
+  }
+
+  async function loadReviewerWorkload(options = {}) {
+    const silent = options.silent === true;
+
+    try {
+      const response = await service.loadReviewerWorkload();
+      setReviewerWorkload(Array.isArray(response) ? response : []);
+    } catch (error) {
+      if (!silent) {
+        pushToast({
+          type: "error",
+          title: "Reviewer Workload Failed",
+          message: getErrorMessage(error, "Failed to load reviewer workload."),
         });
       }
     }
@@ -404,6 +426,7 @@ export default function App() {
 
   useEffect(() => {
     loadDashboardSummary({ silent: true });
+    loadReviewerWorkload({ silent: true });
   }, [service]);
 
   useEffect(() => {
@@ -470,6 +493,7 @@ export default function App() {
       }
       await loadInbox(filters, { preserveSelectedRecordId: activeRecordId });
       await loadDashboardSummary({ silent: true });
+      await loadReviewerWorkload({ silent: true });
       if (refreshedInboxItem?.approvalRecordId) {
         setInboxItems((current) =>
           current.map((item) =>
@@ -589,6 +613,7 @@ export default function App() {
 
       await loadInbox(filters, { preserveSelectedRecordId: activeRecordId });
       await loadDashboardSummary({ silent: true });
+      await loadReviewerWorkload({ silent: true });
 
       if (refreshedInboxItem?.approvalRecordId) {
         setInboxItems((current) =>
@@ -617,6 +642,23 @@ export default function App() {
   }
 
   const selectedSortValue = `${filters.sortBy}:${filters.sortDirection}`;
+  const reviewerOptions = useMemo(() => {
+    const unique = new Map();
+    reviewerWorkload.forEach((entry) => {
+      if (entry?.reviewerEmail && !unique.has(entry.reviewerEmail)) {
+        unique.set(entry.reviewerEmail, entry.reviewerName || entry.reviewerEmail);
+      }
+    });
+
+    return [
+      { value: "All Reviewers", label: "All Reviewers" },
+      { value: "Unassigned", label: "Unassigned" },
+      ...Array.from(unique.entries()).map(([value, label]) => ({
+        value,
+        label: `${label} (${value})`,
+      })),
+    ];
+  }, [reviewerWorkload]);
   const summaryCurrencyCode =
     inboxItems[0]?.currencyCode ||
     selectedDetail?.currencyCode ||
@@ -767,6 +809,61 @@ export default function App() {
       </section>
 
       <section className="widget-surface p-5">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">Reviewer Workload</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Track active invoice approval workload by assigned reviewer.
+          </p>
+        </div>
+
+        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+          <table className="min-w-[920px] w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium">Reviewer</th>
+                <th className="px-4 py-3 text-left font-medium">Email</th>
+                <th className="px-4 py-3 text-left font-medium">Assigned</th>
+                <th className="px-4 py-3 text-left font-medium">Pending</th>
+                <th className="px-4 py-3 text-left font-medium">Needs Clarification</th>
+                <th className="px-4 py-3 text-left font-medium">Review Amount</th>
+                <th className="px-4 py-3 text-left font-medium">Unassigned</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reviewerWorkload.length ? (
+                reviewerWorkload.map((entry) => (
+                  <tr
+                    key={`${entry.reviewerEmail || entry.reviewerName}`}
+                    className="border-t border-slate-200 text-slate-700"
+                  >
+                    <td className="px-4 py-3 font-medium text-slate-900">
+                      {entry.reviewerName || "Unassigned"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {entry.reviewerEmail || "Not available"}
+                    </td>
+                    <td className="px-4 py-3">{entry.assignedCount}</td>
+                    <td className="px-4 py-3">{entry.pendingCount}</td>
+                    <td className="px-4 py-3">{entry.needsClarificationCount}</td>
+                    <td className="px-4 py-3">
+                      {formatSummaryAmount(entry.reviewAmount, summaryCurrencyCode)}
+                    </td>
+                    <td className="px-4 py-3">{entry.unassignedCount}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr className="border-t border-slate-200">
+                  <td colSpan="7" className="px-4 py-4 text-slate-500">
+                    No reviewer workload data is available yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="widget-surface p-5">
         <div className="flex flex-wrap gap-2">
           {STATUS_TABS.map((tab) => (
             <button
@@ -843,6 +940,22 @@ export default function App() {
               <option value="High">High</option>
               <option value="Medium">Medium</option>
               <option value="Low">Low</option>
+            </select>
+          </label>
+          <label className="widget-field">
+            <span className="widget-label">Reviewer</span>
+            <select
+              className="widget-input"
+              value={filters.reviewerFilter}
+              onChange={(event) =>
+                updateFilters({ reviewerFilter: event.target.value })
+              }
+            >
+              {reviewerOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="widget-field">
@@ -935,6 +1048,32 @@ export default function App() {
               return service.loadInvoiceDetail(selectedRecordId);
             })
           }
+          onAssignReviewer={async (payload) => {
+            setActionLoading(true);
+            const activeRecordId = selectedRecordId;
+
+            try {
+              const detail = await service.assignInvoiceReviewer(selectedRecordId, payload);
+              setSelectedDetail(detail);
+              setGuardrailCheck(null);
+              await loadInbox(filters, { preserveSelectedRecordId: activeRecordId });
+              await loadDashboardSummary({ silent: true });
+              await loadReviewerWorkload({ silent: true });
+              pushToast({
+                type: "success",
+                title: "Reviewer Assigned",
+                message: "Reviewer assignment updated successfully.",
+              });
+            } catch (error) {
+              pushToast({
+                type: "error",
+                title: "Assignment Failed",
+                message: getErrorMessage(error, "Failed to assign reviewer."),
+              });
+            } finally {
+              setActionLoading(false);
+            }
+          }}
         />
       </section>
 
@@ -954,7 +1093,9 @@ export default function App() {
                 "getBooksInvoiceDetails",
                 "getCrmContextForInvoice",
                 "getApprovalDashboardSummary",
+                "getReviewerWorkloadSummary",
                 "validateInvoiceApproval",
+                "assignInvoiceReviewer",
                 "approveInvoice",
                 "rejectInvoice",
                 "requestClarification",

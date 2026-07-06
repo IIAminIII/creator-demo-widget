@@ -659,6 +659,13 @@ button {
   border-radius: 14px;
 }
 
+.table-wrap {
+  margin-top: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
 .line-items-table {
   margin-top: 0;
   min-width: 920px;

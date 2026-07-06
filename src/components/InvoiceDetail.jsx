@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import StatusBadge from "./StatusBadge";
 
 function formatCurrency(value, currencyCode) {
@@ -292,10 +292,14 @@ export default function InvoiceDetail({
   onReject,
   onClarify,
   onAddComment,
+  onAssignReviewer,
 }) {
   const [reviewer, setReviewer] = useState("Finance Ops");
   const [comment, setComment] = useState("");
   const [exceptionReason, setExceptionReason] = useState("");
+  const [reviewerName, setReviewerName] = useState("");
+  const [reviewerEmail, setReviewerEmail] = useState("");
+  const [assignmentNote, setAssignmentNote] = useState("");
 
   const summaryCards = useMemo(() => {
     if (!detail) {
@@ -322,6 +326,13 @@ export default function InvoiceDetail({
   const reviewerDecisionSummary = detail
     ? deriveReviewerDecisionSummary(detail)
     : null;
+
+  useEffect(() => {
+    setReviewer(detail?.assignedReviewer || "Finance Ops");
+    setReviewerName(detail?.assignedReviewer || "");
+    setReviewerEmail(detail?.reviewerEmail || "");
+    setAssignmentNote(detail?.assignmentNote || "");
+  }, [detail]);
 
   if (loading) {
     return (
@@ -544,6 +555,79 @@ export default function InvoiceDetail({
           </section>
 
           <aside className="space-y-6">
+            <div className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-700">
+                Reviewer Assignment
+              </div>
+              <h4 className="mt-3 text-lg font-semibold text-slate-900">Reviewer Assignment</h4>
+              <p className="mt-2 text-sm text-slate-500">
+                Assign or reassign this invoice to the right reviewer.
+              </p>
+              <div className="mt-4 grid gap-3">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Assigned Reviewer</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{detail.assignedReviewer || "Unassigned"}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Reviewer Email</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{detail.reviewerEmail || "Not available"}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Assignment Status</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{detail.assignmentStatus || "Unassigned"}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Assigned Date</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatDateTime(detail.assignedDate)}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Assignment Notes</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700">{detail.assignmentNote || "No assignment note yet."}</p>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <label className="block">
+                  <span className="block text-sm font-medium text-slate-700">Reviewer Name</span>
+                  <input
+                    className="mt-2 h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm text-slate-800 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                    value={reviewerName}
+                    onChange={(event) => setReviewerName(event.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-sm font-medium text-slate-700">Reviewer Email</span>
+                  <input
+                    className="mt-2 h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm text-slate-800 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                    value={reviewerEmail}
+                    onChange={(event) => setReviewerEmail(event.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-sm font-medium text-slate-700">Assignment Note</span>
+                  <textarea
+                    className="mt-2 min-h-24 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                    value={assignmentNote}
+                    onChange={(event) => setAssignmentNote(event.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                  disabled={actionLoading || !reviewerName.trim()}
+                  onClick={async () => {
+                    await onAssignReviewer({
+                      reviewerName,
+                      reviewerEmail,
+                      assignmentNote,
+                    });
+                  }}
+                >
+                  Assign Reviewer
+                </button>
+              </div>
+            </div>
+
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
               <div className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
                 Reviewer Decision Summary
