@@ -4,6 +4,7 @@ import InvoiceDetail from "./components/InvoiceDetail";
 import InvoiceInbox from "./components/InvoiceInbox";
 import LoadingSpinner from "./components/LoadingSpinner";
 import { useCreator } from "./contexts/DataContext";
+import { createInvoiceApprovalAiTools } from "./services/aiTools";
 import {
   createInvoiceApprovalService,
   resolveInvoiceApprovalConfig,
@@ -185,6 +186,35 @@ function toInboxItemFromDetail(detail) {
   };
 }
 
+function createAssistantIntroMessage(detail = null) {
+  if (detail?.invoiceNumber) {
+    return {
+      id: `assistant-intro-${detail.approvalRecordId || detail.invoiceNumber}`,
+      role: "assistant",
+      title: "Approval Copilot",
+      summary: `Ask about ${detail.invoiceNumber}. I answer from the current Creator workflow data, Books snapshot, and reviewer workload records.`,
+      suggestions: [
+        "Why is this invoice blocked?",
+        "Show me the line items.",
+        "Summarize approval risks.",
+      ],
+    };
+  }
+
+  return {
+    id: "assistant-intro-empty",
+    role: "assistant",
+    title: "Approval Copilot",
+    summary:
+      "Ask for a daily briefing, escalation risks, reviewer workload, or select an invoice and ask why it is blocked.",
+    suggestions: [
+      "Give me a daily briefing.",
+      "Show escalation risks.",
+      "Show reviewer workload.",
+    ],
+  };
+}
+
 export default function App() {
   const {
     api,
@@ -203,6 +233,7 @@ export default function App() {
     () => createInvoiceApprovalService({ api, config, creator, initData }),
     [api, config, creator, initData],
   );
+  const aiTools = useMemo(() => createInvoiceApprovalAiTools(service), [service]);
 
   const [filters, setFilters] = useState(() =>
     createDefaultFilters(config.inboxDefaultStatusFilter),
@@ -225,6 +256,10 @@ export default function App() {
   const [actionLoading, setActionLoading] = useState(false);
   const [guardrailCheck, setGuardrailCheck] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [assistantMessages, setAssistantMessages] = useState(() => [
+    createAssistantIntroMessage(),
+  ]);
+  const [assistantLoading, setAssistantLoading] = useState(false);
 
   function dismissToast(toastId) {
     setToasts((current) => current.filter((toast) => toast.id !== toastId));
@@ -436,8 +471,16 @@ export default function App() {
   useEffect(() => {
     if (selectedRecordId) {
       loadDetail(selectedRecordId);
+    } else {
+      setSelectedDetail(null);
+      setGuardrailCheck(null);
+      setAssistantMessages([createAssistantIntroMessage()]);
     }
   }, [selectedRecordId]);
+
+  useEffect(() => {
+    setAssistantMessages([createAssistantIntroMessage(selectedDetail)]);
+  }, [selectedDetail?.approvalRecordId, selectedDetail?.invoiceNumber]);
 
   useEffect(() => {
     const intervalMs = Number(config.autoRefreshIntervalMs || 0);
@@ -638,6 +681,63 @@ export default function App() {
       });
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function handleAssistantPrompt(prompt) {
+    const trimmedPrompt = String(prompt || "").trim();
+
+    if (!trimmedPrompt) {
+      return;
+    }
+
+    setAssistantMessages((current) => [
+      ...current,
+      {
+        id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        role: "user",
+        summary: trimmedPrompt,
+      },
+    ]);
+    setAssistantLoading(true);
+
+    try {
+      const response = await aiTools.answerReviewerQuery({
+        prompt: trimmedPrompt,
+        approvalRecordId: selectedRecordId,
+        filters,
+      });
+
+      if (response.guardrailCheck) {
+        setGuardrailCheck(response.guardrailCheck);
+      }
+
+      setAssistantMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          role: "assistant",
+          title: response.title || "Approval Copilot",
+          summary: response.summary || response.message,
+          bullets: response.bullets || [],
+          suggestions: response.suggestions || [],
+          tone: response.ok ? "neutral" : "warning",
+        },
+      ]);
+    } catch (error) {
+      setAssistantMessages((current) => [
+        ...current,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: "assistant",
+          title: "Approval Copilot",
+          summary: getErrorMessage(error, "I couldn't generate that answer right now."),
+          suggestions: ["Try again after refreshing the selected invoice."],
+          tone: "warning",
+        },
+      ]);
+    } finally {
+      setAssistantLoading(false);
     }
   }
 
@@ -1025,6 +1125,9 @@ export default function App() {
           loading={detailLoading}
           actionLoading={actionLoading}
           guardrailCheck={guardrailCheck}
+          assistantMessages={assistantMessages}
+          assistantLoading={assistantLoading}
+          onAskAssistant={handleAssistantPrompt}
           onRefresh={() =>
             runAction(async () => {
               const refreshed = await service.refreshInvoice(selectedDetail.booksInvoiceId);
