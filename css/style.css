@@ -625,6 +625,43 @@ button {
   line-height: 1.45;
 }
 
+.assistant-copy {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.assistant-bullets {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.assistant-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.assistant-list-item {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.assistant-list-item strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
 .snapshot-table {
   width: 100%;
   border-collapse: collapse;

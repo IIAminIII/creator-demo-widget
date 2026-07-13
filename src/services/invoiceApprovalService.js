@@ -16,6 +16,27 @@ function getFirstString(...values) {
   return "";
 }
 
+function getNestedPathValue(record, path) {
+  if (!record || !path) {
+    return undefined;
+  }
+
+  return String(path)
+    .split(".")
+    .reduce((currentValue, segment) => currentValue?.[segment], record);
+}
+
+function getFirstDefinedValue(record, paths = [], fallback = undefined) {
+  for (const path of paths) {
+    const value = getNestedPathValue(record, path);
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return fallback;
+}
+
 function normalizeStatus(value) {
   return getFirstString(value, "New");
 }
@@ -73,6 +94,7 @@ function normalizeLineItem(record = {}) {
 function extractLineItems(detail = {}) {
   const source =
     (Array.isArray(detail?.invoice?.lineItems) && detail.invoice.lineItems) ||
+    (Array.isArray(detail?.books?.lineItems) && detail.books.lineItems) ||
     (Array.isArray(detail?.lineItems) && detail.lineItems) ||
     (Array.isArray(detail?.booksLineItems) && detail.booksLineItems) ||
     [];
@@ -91,6 +113,7 @@ function normalizeInboxFilters(filters = {}) {
     paymentFilter: normalizeFilterValue(filters.paymentFilter, "All"),
     priorityFilter: normalizeFilterValue(filters.priorityFilter, "All"),
     reviewerFilter: normalizeFilterValue(filters.reviewerFilter, "All Reviewers"),
+    slaFilter: normalizeFilterValue(filters.slaFilter, "All"),
     searchText: getFirstString(filters.searchText, filters.search),
     sortBy: getFirstString(filters.sortBy, "dueDate"),
     sortDirection: getFirstString(filters.sortDirection, "asc"),
@@ -235,6 +258,26 @@ function matchesPriorityFilter(item, priorityFilter) {
   return matchesSelectFilter(item.priority, priorityFilter);
 }
 
+function matchesSlaFilter(item, slaFilter) {
+  if (!slaFilter || slaFilter === "All") {
+    return true;
+  }
+
+  if (slaFilter === "Due Soon") {
+    return isDueSoonItem(item);
+  }
+
+  if (slaFilter === "Escalated") {
+    return (
+      normalizeBadgeValue(item.slaStatus).includes("escalated") ||
+      isOverdueInvoice(item) ||
+      isFailedRefreshItem(item)
+    );
+  }
+
+  return matchesSelectFilter(item.slaStatus, slaFilter);
+}
+
 function matchesReviewerFilter(item, reviewerFilter) {
   if (!reviewerFilter || reviewerFilter === "All" || reviewerFilter === "All Reviewers") {
     return true;
@@ -279,6 +322,7 @@ function matchesFilter(item, filters) {
     matchesSyncFilter(item, normalizedFilters.syncFilter) &&
     matchesPaymentFilter(item, normalizedFilters.paymentFilter) &&
     matchesPriorityFilter(item, normalizedFilters.priorityFilter) &&
+    matchesSlaFilter(item, normalizedFilters.slaFilter) &&
     matchesReviewerFilter(item, normalizedFilters.reviewerFilter) &&
     matchesSearchText(item, normalizedFilters.searchText)
   );
@@ -342,11 +386,12 @@ function buildInboxPayload(filters = {}) {
 
   return {
     statusFilter: backendStatusFilter,
-    syncFilter: "All",
-    paymentFilter: "All",
-    priorityFilter: "All",
+    syncFilter: normalized.syncFilter || "All",
+    paymentFilter: normalized.paymentFilter || "All",
+    priorityFilter: normalized.priorityFilter || "All",
     reviewerFilter:
       normalized.reviewerFilter === "All Reviewers" ? "All" : normalized.reviewerFilter,
+    slaFilter: normalized.slaFilter || "All",
     searchText: normalized.searchText,
     sortBy: normalized.sortBy,
     sortDirection: normalized.sortDirection,
@@ -575,6 +620,7 @@ function normalizeMockInboxItem(record) {
     crmDealName: record.crmDealName,
     syncStatus: record.syncStatus,
     differenceFound: toBooleanLike(record.differenceFound, false),
+    slaStatus: getFirstString(record.slaStatus),
   };
 }
 
@@ -585,69 +631,179 @@ function normalizeCreatorRecord(record) {
       record.Books_Invoice_ID,
       record.books_invoice_id,
       record.booksInvoiceId,
+      getFirstDefinedValue(record, ["books.invoiceId", "books.booksInvoiceId"]),
     ),
     invoiceNumber: getFirstString(
       record.Books_Invoice_Number,
       record.Invoice_Number,
       record.invoiceNumber,
+      getFirstDefinedValue(record, ["books.invoiceNumber"]),
     ),
     customerName: getFirstString(
       record.Books_Customer_Name,
       record.Customer_Name,
       record.customerName,
+      getFirstDefinedValue(record, ["books.customerName", "crm.customerName"]),
     ),
-    invoiceTotal: toNumber(record.Invoice_Total ?? record.invoiceTotal ?? record.total),
-    currencyCode: getFirstString(record.Currency_Code, record.currencyCode, "USD"),
-    dueDate: getFirstString(record.Due_Date, record.dueDate),
-    invoiceDate: getFirstString(record.Invoice_Date, record.invoiceDate),
+    invoiceTotal: toNumber(
+      record.Invoice_Total ??
+        record.invoiceTotal ??
+        record.total ??
+        getFirstDefinedValue(record, ["books.invoiceTotal", "books.total"], 0),
+    ),
+    currencyCode: getFirstString(
+      record.Currency_Code,
+      record.currencyCode,
+      getFirstDefinedValue(record, ["books.currencyCode"]),
+      "USD",
+    ),
+    dueDate: getFirstString(
+      record.Due_Date,
+      record.dueDate,
+      getFirstDefinedValue(record, ["books.dueDate"]),
+    ),
+    invoiceDate: getFirstString(
+      record.Invoice_Date,
+      record.invoiceDate,
+      getFirstDefinedValue(record, ["books.invoiceDate"]),
+    ),
     booksStatus: getFirstString(
       record.Books_Invoice_Status,
       record.booksStatus,
       record.status,
+      getFirstDefinedValue(record, ["books.status", "books.invoiceStatus"]),
       "sent",
     ),
     paymentStatus: getFirstString(
       record.Books_Payment_Status,
       record.paymentStatus,
+      getFirstDefinedValue(record, ["books.paymentStatus"]),
       "unpaid",
     ),
     approvalStatus: normalizeStatus(
-      getFirstString(record.Approval_Status, record.approvalStatus),
+      getFirstString(
+        record.Approval_Status,
+        record.approvalStatus,
+        getFirstDefinedValue(record, ["creator.approvalStatus", "approval.approvalStatus"]),
+      ),
     ),
-    priority: getFirstString(record.Priority, "Medium"),
-    crmAccountName: getFirstString(record.CRM_Account_Name, record.crmAccountName),
-    crmDealName: getFirstString(record.CRM_Deal_Name, record.crmDealName),
-    crmOwnerName: getFirstString(record.CRM_Owner_Name, record.Account_Manager),
-    assignedReviewer: getFirstString(record.Assigned_Reviewer, "Unassigned"),
-    reviewerEmail: getFirstString(record.Reviewer_Email, record.reviewerEmail),
-    assignmentStatus: getFirstString(record.Assignment_Status, record.assignmentStatus),
-    assignedDate: getFirstString(record.Assigned_Date, record.assignedDate),
-    assignmentNote: getFirstString(record.Assignment_Note, record.assignmentNote),
-    exceptionReason: getFirstString(record.Exception_Reason),
-    reviewerNotes: getFirstString(record.Reviewer_Notes),
-    decisionDate: getFirstString(record.Approval_Decision_Date),
-    lastActionBy: getFirstString(record.Last_Action_By, record.lastActionBy),
-    lastActionDate: getFirstString(record.Last_Action_Date, record.lastActionDate),
-    lastEventType: getFirstString(record.Last_Event_Type, record.lastEventType),
-    lastBooksSyncAt: getFirstString(record.Last_Books_Sync_At),
-    lastCrmEnrichmentAt: getFirstString(record.Last_CRM_Enrichment_At),
+    priority: getFirstString(
+      record.Priority,
+      getFirstDefinedValue(record, ["creator.priority", "approval.priority"]),
+      "Medium",
+    ),
+    crmAccountName: getFirstString(
+      record.CRM_Account_Name,
+      record.crmAccountName,
+      getFirstDefinedValue(record, ["crm.accountName", "crm.crmAccountName"]),
+    ),
+    crmDealName: getFirstString(
+      record.CRM_Deal_Name,
+      record.crmDealName,
+      getFirstDefinedValue(record, ["crm.dealName", "crm.crmDealName"]),
+    ),
+    crmOwnerName: getFirstString(
+      record.CRM_Owner_Name,
+      record.Account_Manager,
+      getFirstDefinedValue(record, ["crm.ownerName", "crm.accountManager"]),
+    ),
+    assignedReviewer: getFirstString(
+      record.Assigned_Reviewer,
+      getFirstDefinedValue(record, ["creator.assignedReviewer", "approval.assignedReviewer"]),
+      "Unassigned",
+    ),
+    reviewerEmail: getFirstString(
+      record.Reviewer_Email,
+      record.reviewerEmail,
+      getFirstDefinedValue(record, ["creator.reviewerEmail", "approval.reviewerEmail"]),
+    ),
+    assignmentStatus: getFirstString(
+      record.Assignment_Status,
+      record.assignmentStatus,
+      getFirstDefinedValue(record, ["creator.assignmentStatus", "approval.assignmentStatus"]),
+    ),
+    assignedDate: getFirstString(
+      record.Assigned_Date,
+      record.assignedDate,
+      getFirstDefinedValue(record, ["creator.assignedDate", "approval.assignedDate"]),
+    ),
+    assignmentNote: getFirstString(
+      record.Assignment_Note,
+      record.assignmentNote,
+      getFirstDefinedValue(record, ["creator.assignmentNote", "approval.assignmentNote"]),
+    ),
+    exceptionReason: getFirstString(
+      record.Exception_Reason,
+      getFirstDefinedValue(record, ["creator.exceptionReason", "approval.exceptionReason"]),
+    ),
+    reviewerNotes: getFirstString(
+      record.Reviewer_Notes,
+      getFirstDefinedValue(record, ["creator.reviewerNotes", "approval.reviewerNotes"]),
+    ),
+    decisionDate: getFirstString(
+      record.Approval_Decision_Date,
+      getFirstDefinedValue(record, ["creator.decisionDate", "approval.approvalDecisionDate"]),
+    ),
+    lastActionBy: getFirstString(
+      record.Last_Action_By,
+      record.lastActionBy,
+      getFirstDefinedValue(record, ["creator.lastActionBy", "approval.lastActionBy"]),
+    ),
+    lastActionDate: getFirstString(
+      record.Last_Action_Date,
+      record.lastActionDate,
+      getFirstDefinedValue(record, ["creator.lastActionDate", "approval.lastActionDate"]),
+    ),
+    lastEventType: getFirstString(
+      record.Last_Event_Type,
+      record.lastEventType,
+      getFirstDefinedValue(record, ["creator.lastEventType", "approval.lastEventType"]),
+    ),
+    lastBooksSyncAt: getFirstString(
+      record.Last_Books_Sync_At,
+      getFirstDefinedValue(record, [
+        "books.lastSyncAt",
+        "creator.lastBooksSyncAt",
+        "approval.lastBooksSyncAt",
+      ]),
+    ),
+    lastCrmEnrichmentAt: getFirstString(
+      record.Last_CRM_Enrichment_At,
+      getFirstDefinedValue(record, ["crm.lastEnrichmentAt", "creator.lastCrmEnrichmentAt"]),
+    ),
     lastComparedAt: getFirstString(
       record.Last_Compared_At,
       record.lastComparedAt,
       record.lastBooksComparedAt,
+      getFirstDefinedValue(record, ["creator.lastComparedAt", "approval.lastComparedAt"]),
     ),
     differenceFound: toBooleanLike(
       record.Books_Sync_Difference_Found ??
         record.Difference_Found ??
         record.differenceFound ??
         record.booksSyncDifferenceFound ??
-        record.booksSnapshotDifferenceFound,
+        record.booksSnapshotDifferenceFound ??
+        getFirstDefinedValue(record, [
+          "creator.differenceFound",
+          "approval.differenceFound",
+          "creator.booksSyncDifferenceFound",
+        ]),
     ),
     differenceSummary: getFirstString(
       record.Difference_Summary,
       record.differenceSummary,
+      getFirstDefinedValue(record, ["creator.differenceSummary", "approval.differenceSummary"]),
     ),
-    syncStatus: getFirstString(record.Sync_Status, record.syncStatus),
+    syncStatus: getFirstString(
+      record.Sync_Status,
+      record.syncStatus,
+      getFirstDefinedValue(record, ["creator.syncStatus", "approval.syncStatus"]),
+    ),
+    slaStatus: getFirstString(
+      record.SLA_Status,
+      record.slaStatus,
+      getFirstDefinedValue(record, ["creator.slaStatus", "approval.slaStatus"]),
+    ),
   };
 }
 
@@ -690,6 +846,39 @@ function normalizeAudit(record) {
     summary: getFirstString(record.Event_Summary, record.Summary, "Activity logged."),
     actor: getFirstString(record.Actor, record.Created_By, "System"),
     createdAt: getFirstString(record.Created_At, record.Added_Time, new Date().toISOString()),
+  };
+}
+
+function normalizeCrmContextRecord(record = {}, fallback = {}) {
+  return {
+    accountName: getFirstString(
+      record.accountName,
+      record.crmAccountName,
+      record.CRM_Account_Name,
+      fallback.accountName,
+      fallback.crmAccountName,
+    ),
+    dealName: getFirstString(
+      record.dealName,
+      record.crmDealName,
+      record.CRM_Deal_Name,
+      fallback.dealName,
+      fallback.crmDealName,
+    ),
+    accountManager: getFirstString(
+      record.accountManager,
+      record.ownerName,
+      record.crmOwnerName,
+      record.CRM_Owner_Name,
+      fallback.accountManager,
+      fallback.crmOwnerName,
+    ),
+    segment: getFirstString(record.segment, record.dealStage, fallback.segment),
+    renewalWindow: getFirstString(
+      record.renewalWindow,
+      record.lastActivityDate,
+      fallback.renewalWindow,
+    ),
   };
 }
 
@@ -949,6 +1138,24 @@ function createMockService() {
       );
     },
 
+    async checkApprovalEscalations() {
+      const allItems = mockStore.map(normalizeMockInboxItem);
+      const dueSoonItems = allItems.filter((item) => matchesFilter(item, { slaFilter: "Due Soon" }));
+      const escalatedItems = allItems.filter((item) =>
+        matchesFilter(item, { slaFilter: "Escalated" }),
+      );
+
+      return {
+        ok: true,
+        message: "Mock escalation check completed successfully.",
+        dueSoonCount: dueSoonItems.length,
+        escalatedCount: escalatedItems.length,
+        dueSoonItems: clone(dueSoonItems),
+        escalatedItems: clone(escalatedItems),
+        checkedAt: new Date().toISOString(),
+      };
+    },
+
     async refreshInvoice(invoiceId) {
       const record = mockStore.find((item) => item.booksInvoiceId === invoiceId);
 
@@ -957,7 +1164,7 @@ function createMockService() {
       }
 
       record.lastBooksSyncAt = new Date().toISOString();
-      addMockAudit(record, "Books Snapshot Refreshed", "Invoice snapshot refreshed from the local preview source.", "System");
+      addMockAudit(record, "Books Refreshed", "Invoice snapshot refreshed from the local preview source.", "System");
 
       return clone(record);
     },
@@ -984,7 +1191,7 @@ function createMockService() {
 
       addMockAudit(
         record,
-        "Comment Added",
+        "Status Changed",
         `Invoice assigned to ${reviewerName}${reviewerEmail ? ` (${reviewerEmail})` : ""}.`,
         reviewerName,
       );
@@ -1186,6 +1393,55 @@ function createCreatorService(api, config) {
     },
 
     async loadInvoiceDetail(approvalRecordId) {
+      if (config.loadInvoiceDetailFunctionName) {
+        try {
+          const response = await tryInvokeCreatorFunction(
+            api,
+            config.loadInvoiceDetailFunctionName,
+            { approvalRecordId, recordId: approvalRecordId },
+          );
+          const result = response?.data?.result ?? response?.result ?? response?.data ?? response;
+          const detail =
+            result?.detail || result?.data?.detail || result?.data || result;
+
+          if (detail && typeof detail === "object") {
+            const invoice = normalizeCreatorRecord(detail);
+            const comments = Array.isArray(detail.comments)
+              ? detail.comments.map(normalizeComment)
+              : Array.isArray(detail.creator?.comments)
+                ? detail.creator.comments.map(normalizeComment)
+                : [];
+            const audit = Array.isArray(detail.audit)
+              ? detail.audit.map(normalizeAudit)
+              : Array.isArray(detail.creator?.audit)
+                ? detail.creator.audit.map(normalizeAudit)
+                : [];
+            const lastAuditSummary = getLatestAuditSummary(audit);
+            const crmContext = normalizeCrmContextRecord(
+              detail.crmContext || detail.crm || {},
+              invoice,
+            );
+
+            return {
+              ...invoice,
+              lastComparedAt: invoice.lastComparedAt,
+              differenceFound: invoice.differenceFound,
+              differenceSummary: invoice.differenceSummary,
+              syncStatus: invoice.syncStatus,
+              lastActionBy: invoice.lastActionBy || lastAuditSummary.lastActionBy,
+              lastActionDate: invoice.lastActionDate || lastAuditSummary.lastActionDate,
+              lastEventType: invoice.lastEventType || lastAuditSummary.lastEventType,
+              lineItems: extractLineItems(detail),
+              crmContext,
+              comments,
+              audit,
+            };
+          }
+        } catch (error) {
+          console.warn("Falling back to Creator record detail load:", error);
+        }
+      }
+
       const recordResponse = await api.getRecord(
         config.approvalRequestsReportName,
         approvalRecordId,
@@ -1225,6 +1481,26 @@ function createCreatorService(api, config) {
 
       const invoice = normalizeCreatorRecord(record);
       const lastAuditSummary = getLatestAuditSummary(audit);
+      let crmContext = normalizeCrmContextRecord({}, invoice);
+
+      if (config.crmContextFunctionName) {
+        try {
+          const crmResponse = await tryInvokeCreatorFunction(api, config.crmContextFunctionName, {
+            approvalRecordId,
+            recordId: approvalRecordId,
+            booksInvoiceId: invoice.booksInvoiceId,
+            invoiceNumber: invoice.invoiceNumber,
+          });
+          const crmResult =
+            crmResponse?.data?.result ?? crmResponse?.result ?? crmResponse?.data ?? crmResponse;
+          crmContext = normalizeCrmContextRecord(
+            crmResult?.crmContext || crmResult?.crm || crmResult,
+            invoice,
+          );
+        } catch (error) {
+          console.warn("CRM context enrichment fallback used:", error);
+        }
+      }
 
       return {
         ...invoice,
@@ -1236,23 +1512,21 @@ function createCreatorService(api, config) {
         lastActionDate: invoice.lastActionDate || lastAuditSummary.lastActionDate,
         lastEventType: invoice.lastEventType || lastAuditSummary.lastEventType,
         lineItems: extractLineItems(record),
-        crmContext: {
-          accountName: invoice.crmAccountName,
-          dealName: invoice.crmDealName,
-          accountManager: invoice.crmOwnerName,
-          segment: "",
-          renewalWindow: "",
-        },
+        crmContext,
         comments,
         audit,
       };
     },
 
     async refreshInvoice(invoiceId) {
-      const response = await tryInvokeCreatorFunction(api, config.booksDetailFunctionName, {
+      const response = await tryInvokeCreatorFunction(
+        api,
+        config.refreshInvoiceFunctionName || config.booksDetailFunctionName,
+        {
         invoiceId,
         mode: "refresh",
-      });
+        },
+      );
       return response?.data ?? response;
     },
 
@@ -1284,6 +1558,36 @@ function createCreatorService(api, config) {
         },
         { approvalRecordId: recordId },
       );
+    },
+
+    async checkApprovalEscalations() {
+      if (config.checkApprovalEscalationsFunctionName) {
+        const response = await tryInvokeCreatorFunction(
+          api,
+          config.checkApprovalEscalationsFunctionName,
+          {},
+        );
+        const result = response?.data?.result ?? response?.result ?? response?.data ?? response;
+
+        if (result?.ok === false) {
+          throw new Error(result?.message || "Failed to check approval escalations.");
+        }
+
+        return result;
+      }
+
+      const escalated = await this.loadInbox({ slaFilter: "Escalated", pageSize: 200 });
+      const dueSoon = await this.loadInbox({ slaFilter: "Due Soon", pageSize: 200 });
+
+      return {
+        ok: true,
+        message: "No dedicated escalation function is configured. Returning the current filtered queue view instead.",
+        escalatedCount: escalated.items.length,
+        dueSoonCount: dueSoon.items.length,
+        escalatedItems: escalated.items,
+        dueSoonItems: dueSoon.items,
+        checkedAt: new Date().toISOString(),
+      };
     },
 
     async approveInvoice(recordId, payload) {
@@ -1455,7 +1759,7 @@ function createCreatorService(api, config) {
           config.auditLogFormName,
           {
             Approval_Request_ID: recordId,
-            Event_Type: "Needs Clarification",
+            Event_Type: "Clarification Requested",
             Event_Summary: `Clarification requested: ${payload.exceptionReason || "No reason supplied"}.`,
             Actor: payload.reviewer,
           },
@@ -1497,7 +1801,7 @@ function createCreatorService(api, config) {
           config.auditLogFormName,
           {
             Approval_Request_ID: recordId,
-            Event_Type: "Comment added",
+            Event_Type: "Comment Added",
             Event_Summary: "Reviewer added a new comment.",
             Actor: payload.reviewer,
           },
@@ -1536,28 +1840,55 @@ export function resolveInvoiceApprovalConfig(widgetParams = {}, initData = {}) {
     booksDetailFunctionName: getFirstString(widgetParams.booksDetailFunctionName, "getBooksInvoiceDetails"),
     crmContextFunctionName: getFirstString(widgetParams.crmContextFunctionName, "getCrmContextForInvoice"),
     loadInboxFunctionName: getFirstString(
+      widgetParams.loadUnifiedInboxFunctionName,
+      widgetParams.getUnifiedApprovalInboxFunctionName,
       widgetParams.loadInboxFunctionName,
       widgetParams.getApprovalInboxFunctionName,
       "getApprovalInbox",
     ),
     loadDashboardSummaryFunctionName: getFirstString(
+      widgetParams.loadUnifiedDashboardSummaryFunctionName,
+      widgetParams.getUnifiedApprovalDashboardSummaryFunctionName,
       widgetParams.loadDashboardSummaryFunctionName,
       widgetParams.getApprovalDashboardSummaryFunctionName,
       "getApprovalDashboardSummary",
     ),
+    loadInvoiceDetailFunctionName: getFirstString(
+      widgetParams.loadUnifiedInvoiceDetailFunctionName,
+      widgetParams.getUnifiedApprovalDetailFunctionName,
+      widgetParams.loadInvoiceDetailFunctionName,
+      widgetParams.getApprovalDetailFunctionName,
+      "",
+    ),
+    refreshInvoiceFunctionName: getFirstString(
+      widgetParams.refreshUnifiedInvoiceSnapshotFunctionName,
+      widgetParams.refreshBooksInvoiceSnapshotFunctionName,
+      widgetParams.refreshBooksSnapshotFunctionName,
+      widgetParams.booksDetailFunctionName,
+      "getBooksInvoiceDetails",
+    ),
     validateInvoiceApprovalFunctionName: getFirstString(
+      widgetParams.validateUnifiedInvoiceApprovalFunctionName,
       widgetParams.validateInvoiceApprovalFunctionName,
       widgetParams.validateApprovalFunctionName,
       "validateInvoiceApproval",
     ),
     loadReviewerWorkloadFunctionName: getFirstString(
+      widgetParams.loadUnifiedReviewerWorkloadFunctionName,
+      widgetParams.getUnifiedReviewerWorkloadSummaryFunctionName,
       widgetParams.loadReviewerWorkloadFunctionName,
       widgetParams.getReviewerWorkloadSummaryFunctionName,
       "getReviewerWorkloadSummary",
     ),
     assignInvoiceReviewerFunctionName: getFirstString(
+      widgetParams.assignUnifiedInvoiceReviewerFunctionName,
       widgetParams.assignInvoiceReviewerFunctionName,
       "assignInvoiceReviewer",
+    ),
+    checkApprovalEscalationsFunctionName: getFirstString(
+      widgetParams.checkUnifiedApprovalEscalationsFunctionName,
+      widgetParams.checkApprovalEscalationsFunctionName,
+      "checkApprovalEscalations",
     ),
     approvalActionFunctionName: getFirstString(widgetParams.approvalActionFunctionName, "approveInvoice"),
     inboxDefaultStatusFilter: getFirstString(widgetParams.inboxDefaultStatusFilter, "All"),

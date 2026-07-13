@@ -171,17 +171,24 @@ function getAuditEventPresentation(eventType = "") {
     };
   }
 
-  if (normalized === "books snapshot refreshed" || normalized === "books refresh") {
+  if (normalized === "books refreshed" || normalized === "books refresh") {
     return {
       label: "Books Snapshot Refreshed",
       toneClass: "bg-sky-50 text-sky-700 border-sky-200",
     };
   }
 
-  if (normalized === "books sync failed" || normalized === "books refresh failed") {
+  if (normalized === "sync error" || normalized === "books refresh failed") {
     return {
       label: "Books Refresh Failed",
       toneClass: "bg-rose-50 text-rose-700 border-rose-200",
+    };
+  }
+
+  if (normalized === "status changed") {
+    return {
+      label: "Workflow Status Changed",
+      toneClass: "bg-slate-100 text-slate-700 border-slate-200",
     };
   }
 

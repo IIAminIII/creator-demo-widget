@@ -1089,6 +1089,11 @@ export default function App() {
               config,
               runtimeMode: service.mode,
               requiredFunctions: [
+                "getUnifiedApprovalInbox",
+                "getUnifiedApprovalDetail",
+                "refreshUnifiedInvoiceSnapshot",
+                "getUnifiedApprovalDashboardSummary",
+                "getUnifiedReviewerWorkloadSummary",
                 "listBooksInvoicesForApproval",
                 "getBooksInvoiceDetails",
                 "getCrmContextForInvoice",

@@ -42,6 +42,7 @@ function toInboxItem(record) {
     crmDealName: record.crmContext.crmDealName,
     syncStatus: record.approval.syncStatus,
     differenceFound: toBooleanLike(record.approval.differenceFound, false),
+    slaStatus: normalizeText(record.approval.slaStatus),
   };
 }
 
@@ -52,6 +53,7 @@ function normalizeInboxFilters(filters = {}) {
     paymentFilter: normalizeText(filters.paymentFilter) || "All",
     priorityFilter: normalizeText(filters.priorityFilter) || "All",
     reviewerFilter: normalizeText(filters.reviewerFilter) || "All Reviewers",
+    slaFilter: normalizeText(filters.slaFilter) || "All",
     searchText: normalizeText(filters.searchText || filters.search),
     sortBy: normalizeText(filters.sortBy) || "dueDate",
     sortDirection: normalizeText(filters.sortDirection) || "asc",
@@ -195,6 +197,23 @@ function matchesFilters(item, filters = {}) {
     return false;
   }
 
+  if (normalizedFilters.slaFilter !== "All") {
+    if (normalizedFilters.slaFilter === "Due Soon" && !isDueSoonItem(item)) {
+      return false;
+    }
+
+    if (
+      normalizedFilters.slaFilter === "Escalated" &&
+      !(
+        normalizeBadgeText(item.slaStatus).includes("escalated") ||
+        isOverdueInvoice(item) ||
+        isFailedRefreshItem(item)
+      )
+    ) {
+      return false;
+    }
+  }
+
   if (
     normalizedFilters.reviewerFilter !== "All Reviewers" &&
     normalizedFilters.reviewerFilter !== "All"
@@ -289,13 +308,14 @@ function buildInboxPayload(filters = {}) {
 
   return {
     statusFilter: backendStatusFilter,
-    syncFilter: "All",
-    paymentFilter: "All",
-    priorityFilter: "All",
+    syncFilter: normalized.syncFilter || "All",
+    paymentFilter: normalized.paymentFilter || "All",
+    priorityFilter: normalized.priorityFilter || "All",
     reviewerFilter:
       normalized.reviewerFilter === "All Reviewers"
         ? "All"
         : normalized.reviewerFilter,
+    slaFilter: normalized.slaFilter || "All",
     searchText: normalized.searchText,
     sortBy: normalized.sortBy,
     sortDirection: normalized.sortDirection,
@@ -611,6 +631,23 @@ function createMockService() {
         { approvalRecordId: recordId },
       );
     },
+    async checkApprovalEscalations() {
+      const items = state.map(toInboxItem);
+      const dueSoonItems = items.filter((item) => matchesFilters(item, { slaFilter: "Due Soon" }));
+      const escalatedItems = items.filter((item) =>
+        matchesFilters(item, { slaFilter: "Escalated" }),
+      );
+
+      return {
+        ok: true,
+        message: "Mock escalation check completed successfully.",
+        dueSoonCount: dueSoonItems.length,
+        escalatedCount: escalatedItems.length,
+        dueSoonItems: deepClone(dueSoonItems),
+        escalatedItems: deepClone(escalatedItems),
+        checkedAt: nowIso(),
+      };
+    },
     async refreshBooksInvoiceSnapshot(recordId) {
       const index = findRecordIndex(state, recordId);
 
@@ -622,7 +659,7 @@ function createMockService() {
       record.approval.lastBooksSyncAt = nowIso();
       record.audit.unshift(
         buildAuditEntry(record, {
-          eventType: "Books Snapshot Refreshed",
+          eventType: "Books Refreshed",
           previousStatus: record.approval.approvalStatus,
           newStatus: record.approval.approvalStatus,
           eventMessage: "Books snapshot refreshed from the preview data source.",
@@ -656,7 +693,7 @@ function createMockService() {
 
       record.audit.unshift(
         buildAuditEntry(record, {
-          eventType: "Comment Added",
+          eventType: "Status Changed",
           previousStatus: record.approval.approvalStatus,
           newStatus: record.approval.approvalStatus,
           eventMessage: `Invoice assigned to ${reviewerName}.`,
@@ -818,7 +855,9 @@ function unwrapCreatorApiResponse(response) {
 
 function getNestedValue(record, keys, fallback = "") {
   for (const key of keys) {
-    const value = record?.[key];
+    const value = String(key)
+      .split(".")
+      .reduce((currentValue, segment) => currentValue?.[segment], record);
     if (value !== undefined && value !== null && value !== "") {
       return value;
     }
@@ -1041,72 +1080,72 @@ function mapApprovalRecord(record) {
       ),
     ),
     booksInvoiceId: String(
-      getNestedValue(record, ["Books_Invoice_ID", "booksInvoiceId"], ""),
+      getNestedValue(record, ["Books_Invoice_ID", "booksInvoiceId", "books.invoiceId", "books.booksInvoiceId"], ""),
     ),
     invoiceNumber: String(
       getNestedValue(
         record,
-        ["Books_Invoice_Number", "Invoice_Number", "invoiceNumber"],
+        ["Books_Invoice_Number", "Invoice_Number", "invoiceNumber", "books.invoiceNumber"],
         "",
       ),
     ),
     customerName: String(
       getNestedValue(
         record,
-        ["Customer_Name", "Books_Customer_Name", "customerName"],
+        ["Customer_Name", "Books_Customer_Name", "customerName", "books.customerName", "crm.customerName"],
         "Not available",
       ),
     ),
     invoiceTotal: toNumber(
-      getNestedValue(record, ["Invoice_Total", "invoiceTotal", "total"], 0),
+      getNestedValue(record, ["Invoice_Total", "invoiceTotal", "total", "books.invoiceTotal", "books.total"], 0),
     ),
     currencyCode: String(
-      getNestedValue(record, ["Currency_Code", "currencyCode"], "USD"),
+      getNestedValue(record, ["Currency_Code", "currencyCode", "books.currencyCode"], "USD"),
     ),
-    dueDate: String(getNestedValue(record, ["Due_Date", "dueDate"], "")),
-    invoiceDate: String(getNestedValue(record, ["Invoice_Date", "invoiceDate"], "")),
+    dueDate: String(getNestedValue(record, ["Due_Date", "dueDate", "books.dueDate"], "")),
+    invoiceDate: String(getNestedValue(record, ["Invoice_Date", "invoiceDate", "books.invoiceDate"], "")),
     booksStatus: String(
-      getNestedValue(record, ["Books_Invoice_Status", "booksStatus", "status"], "Unknown"),
+      getNestedValue(record, ["Books_Invoice_Status", "booksStatus", "status", "books.status", "books.invoiceStatus"], "Unknown"),
     ),
     paymentStatus: String(
-      getNestedValue(record, ["Books_Payment_Status", "paymentStatus"], "Unknown"),
+      getNestedValue(record, ["Books_Payment_Status", "paymentStatus", "books.paymentStatus"], "Unknown"),
     ),
     approvalStatus: normalizeApprovalStatus(
-      getNestedValue(record, ["Approval_Status", "approvalStatus", "status"], "Pending Review"),
+      getNestedValue(record, ["Approval_Status", "approvalStatus", "status", "creator.approvalStatus", "approval.approvalStatus"], "Pending Review"),
     ),
-    priority: String(getNestedValue(record, ["Priority", "priority"], "Medium")),
+    priority: String(getNestedValue(record, ["Priority", "priority", "creator.priority", "approval.priority"], "Medium")),
     assignedReviewer: String(
-      getNestedValue(record, ["Assigned_Reviewer", "assignedReviewer"], "Unassigned"),
+      getNestedValue(record, ["Assigned_Reviewer", "assignedReviewer", "creator.assignedReviewer", "approval.assignedReviewer"], "Unassigned"),
     ),
     reviewerEmail: String(
-      getNestedValue(record, ["Reviewer_Email", "reviewerEmail"], ""),
+      getNestedValue(record, ["Reviewer_Email", "reviewerEmail", "creator.reviewerEmail", "approval.reviewerEmail"], ""),
     ),
     assignmentStatus: String(
-      getNestedValue(record, ["Assignment_Status", "assignmentStatus"], ""),
+      getNestedValue(record, ["Assignment_Status", "assignmentStatus", "creator.assignmentStatus", "approval.assignmentStatus"], ""),
     ),
     assignedDate: String(
-      getNestedValue(record, ["Assigned_Date", "assignedDate"], ""),
+      getNestedValue(record, ["Assigned_Date", "assignedDate", "creator.assignedDate", "approval.assignedDate"], ""),
     ),
     assignmentNote: String(
-      getNestedValue(record, ["Assignment_Note", "assignmentNote"], ""),
+      getNestedValue(record, ["Assignment_Note", "assignmentNote", "creator.assignmentNote", "approval.assignmentNote"], ""),
     ),
     exceptionReason: String(
-      getNestedValue(record, ["Exception_Reason", "exceptionReason"], ""),
+      getNestedValue(record, ["Exception_Reason", "exceptionReason", "creator.exceptionReason", "approval.exceptionReason"], ""),
     ),
     reviewerNotes: String(
-      getNestedValue(record, ["Reviewer_Notes", "reviewerNotes"], ""),
+      getNestedValue(record, ["Reviewer_Notes", "reviewerNotes", "creator.reviewerNotes", "approval.reviewerNotes"], ""),
     ),
     approvalDecisionDate: String(
-      getNestedValue(record, ["Approval_Decision_Date", "decisionDate"], ""),
+      getNestedValue(record, ["Approval_Decision_Date", "decisionDate", "creator.decisionDate", "approval.approvalDecisionDate"], ""),
     ),
     lastBooksSyncAt: String(
-      getNestedValue(record, ["Last_Books_Sync_At", "lastBooksSyncAt"], ""),
+      getNestedValue(record, ["Last_Books_Sync_At", "lastBooksSyncAt", "books.lastSyncAt", "creator.lastBooksSyncAt", "approval.lastBooksSyncAt"], ""),
     ),
     lastCrmEnrichmentAt: String(
-      getNestedValue(record, ["Last_CRM_Enrichment_At", "lastCrmEnrichmentAt"], ""),
+      getNestedValue(record, ["Last_CRM_Enrichment_At", "lastCrmEnrichmentAt", "crm.lastEnrichmentAt", "creator.lastCrmEnrichmentAt"], ""),
     ),
     lastComparedAt: String(
-      getNestedValue(record, ["Last_Compared_At", "lastComparedAt", "lastBooksComparedAt"], ""),
+      getNestedValue(record, ["Last_Compared_At", "lastComparedAt", "lastBooksComparedAt", "creator.lastComparedAt", "approval.lastComparedAt"], ""),
     ),
     differenceFound: toBooleanLike(getNestedValue(
       record,
@@ -1116,17 +1155,20 @@ function mapApprovalRecord(record) {
         "differenceFound",
         "booksSyncDifferenceFound",
         "booksSnapshotDifferenceFound",
+        "creator.differenceFound",
+        "approval.differenceFound",
+        "creator.booksSyncDifferenceFound",
       ],
       null,
     )),
     differenceSummary: String(
-      getNestedValue(record, ["Difference_Summary", "differenceSummary"], ""),
+      getNestedValue(record, ["Difference_Summary", "differenceSummary", "creator.differenceSummary", "approval.differenceSummary"], ""),
     ),
     crmAccountName: String(
-      getNestedValue(record, ["CRM_Account_Name", "crmAccountName"], ""),
+      getNestedValue(record, ["CRM_Account_Name", "crmAccountName", "crm.accountName", "crm.crmAccountName"], ""),
     ),
     crmDealName: String(
-      getNestedValue(record, ["CRM_Deal_Name", "crmDealName"], ""),
+      getNestedValue(record, ["CRM_Deal_Name", "crmDealName", "crm.dealName", "crm.crmDealName"], ""),
     ),
     accountOwner: String(
       getNestedValue(
@@ -1138,21 +1180,24 @@ function mapApprovalRecord(record) {
           "Account_Manager",
           "accountOwner",
           "accountManager",
+          "crm.ownerName",
+          "crm.accountManager",
         ],
         "",
       ),
     ),
-    dealStage: String(getNestedValue(record, ["CRM_Deal_Stage", "dealStage"], "")),
-    riskLevel: String(getNestedValue(record, ["CRM_Risk_Level", "riskLevel"], "")),
-    syncStatus: String(getNestedValue(record, ["Sync_Status", "syncStatus"], "Unknown")),
+    dealStage: String(getNestedValue(record, ["CRM_Deal_Stage", "dealStage", "crm.dealStage"], "")),
+    riskLevel: String(getNestedValue(record, ["CRM_Risk_Level", "riskLevel", "crm.riskLevel"], "")),
+    syncStatus: String(getNestedValue(record, ["Sync_Status", "syncStatus", "creator.syncStatus", "approval.syncStatus"], "Unknown")),
+    slaStatus: String(getNestedValue(record, ["SLA_Status", "slaStatus", "creator.slaStatus", "approval.slaStatus"], "")),
     lastActionBy: String(
-      getNestedValue(record, ["Last_Action_By", "lastActionBy"], ""),
+      getNestedValue(record, ["Last_Action_By", "lastActionBy", "creator.lastActionBy", "approval.lastActionBy"], ""),
     ),
     lastActionDate: String(
-      getNestedValue(record, ["Last_Action_Date", "lastActionDate"], ""),
+      getNestedValue(record, ["Last_Action_Date", "lastActionDate", "creator.lastActionDate", "approval.lastActionDate"], ""),
     ),
     lastEventType: String(
-      getNestedValue(record, ["Last_Event_Type", "lastEventType"], ""),
+      getNestedValue(record, ["Last_Event_Type", "lastEventType", "creator.lastEventType", "approval.lastEventType"], ""),
     ),
   };
 }
@@ -1176,6 +1221,7 @@ function mapLineItemRecord(record) {
 function extractLineItems(detail) {
   const candidates = [
     detail?.invoice?.lineItems,
+    detail?.books?.lineItems,
     detail?.lineItems,
     detail?.booksLineItems,
   ];
@@ -1241,11 +1287,14 @@ function mapAuditRecord(record) {
 function mapApiInvoiceDetail(detail) {
   const detailSource = {
     ...detail,
+    ...(detail?.books || {}),
+    ...(detail?.crm || {}),
+    ...(detail?.creator || {}),
     ...(detail?.invoice || {}),
     ...(detail?.approval || {}),
   };
   const approvalRecord = mapApprovalRecord(detailSource);
-  const audit = toArray(detail?.audit).map(mapAuditRecord);
+  const audit = toArray(detail?.audit || detail?.creator?.audit).map(mapAuditRecord);
   const lastAuditSummary = getLatestAuditSummary(audit);
   const resolvedApprovalRecordId =
     approvalRecord.approvalRecordId ||
@@ -1266,7 +1315,7 @@ function mapApiInvoiceDetail(detail) {
       paymentStatus: approvalRecord.paymentStatus,
       crmAccountName: String(
         getNestedValue(
-          detail?.crmContext || {},
+          detail?.crmContext || detail?.crm || {},
           ["accountName", "crmAccountName"],
           approvalRecord.crmAccountName,
         ),
@@ -1276,42 +1325,42 @@ function mapApiInvoiceDetail(detail) {
     crmContext: {
       crmAccountName: String(
         getNestedValue(
-          detail?.crmContext || {},
+          detail?.crmContext || detail?.crm || {},
           ["accountName", "crmAccountName"],
           approvalRecord.crmAccountName,
         ),
       ),
       crmDealName: String(
         getNestedValue(
-          detail?.crmContext || {},
+          detail?.crmContext || detail?.crm || {},
           ["dealName", "crmDealName"],
           approvalRecord.crmDealName,
         ),
       ),
       accountOwner: String(
         getNestedValue(
-          detail?.crmContext || {},
+          detail?.crmContext || detail?.crm || {},
           ["accountManager", "accountOwner"],
           approvalRecord.accountOwner,
         ),
       ),
       dealStage: String(
         getNestedValue(
-          detail?.crmContext || {},
+          detail?.crmContext || detail?.crm || {},
           ["segment", "dealStage"],
           approvalRecord.dealStage,
         ),
       ),
       riskLevel: String(
         getNestedValue(
-          detail?.crmContext || {},
+          detail?.crmContext || detail?.crm || {},
           ["riskLevel"],
           approvalRecord.riskLevel || "",
         ),
       ),
       lastActivityDate: String(
         getNestedValue(
-          detail?.crmContext || {},
+          detail?.crmContext || detail?.crm || {},
           ["renewalWindow", "lastActivityDate"],
           "",
         ),
@@ -1358,7 +1407,7 @@ function mapApiInvoiceDetail(detail) {
         ),
       ),
     },
-    comments: toArray(detail?.comments).map(mapCommentRecord),
+    comments: toArray(detail?.comments || detail?.creator?.comments).map(mapCommentRecord),
     audit,
   };
 }
@@ -1761,6 +1810,7 @@ function toInboxItemFromApprovalRecord(record) {
     crmDealName: record.crmDealName,
     syncStatus: record.syncStatus,
     differenceFound: toBooleanLike(record.differenceFound, false),
+    slaStatus: normalizeText(record.slaStatus),
   };
 }
 
@@ -2110,6 +2160,37 @@ function createCreatorService(config, creator, widgetContext) {
         },
         { approvalRecordId: recordId },
       );
+    },
+
+    async checkApprovalEscalations() {
+      if (customApis.checkApprovalEscalations) {
+        const response = await invokeCreatorCustomApi(
+          customApis.checkApprovalEscalations,
+          {},
+        );
+        const normalized = normalizeApiEnvelope(response);
+        const result =
+          normalized?.result || normalized?.data?.result || normalized?.data || normalized;
+
+        if (hasExplicitFailure(result)) {
+          throw new Error(result?.message || "Failed to check approval escalations.");
+        }
+
+        return result;
+      }
+
+      const inboxResponse = await this.loadInbox({ slaFilter: "Escalated", pageSize: 200 });
+      const dueSoonResponse = await this.loadInbox({ slaFilter: "Due Soon", pageSize: 200 });
+
+      return {
+        ok: true,
+        message: "No dedicated escalation API is configured. Returning the current filtered queue view instead.",
+        escalatedCount: inboxResponse.items.length,
+        dueSoonCount: dueSoonResponse.items.length,
+        escalatedItems: inboxResponse.items,
+        dueSoonItems: dueSoonResponse.items,
+        checkedAt: nowIso(),
+      };
     },
 
     async assignInvoiceReviewer(recordId, payload) {

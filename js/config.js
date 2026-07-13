@@ -35,28 +35,53 @@ export const APP_CONFIG = {
       audit: "Invoice_Approval_Audit_Log",
     },
     customApis: {
-      loadInbox: getEnvValue("VITE_CREATOR_GET_APPROVAL_INBOX_URL"),
+      loadInbox: getEnvValue(
+        "VITE_ZOHO_UNIFIED_GET_APPROVAL_INBOX_URL",
+        getEnvValue("VITE_CREATOR_GET_APPROVAL_INBOX_URL"),
+      ),
       loadDashboardSummary: getEnvValue(
-        "VITE_CREATOR_GET_APPROVAL_DASHBOARD_SUMMARY_URL",
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getApprovalDashboardSummary?publickey=QKkMpmbkxqutH7UQwfd9etr9a",
+        "VITE_ZOHO_UNIFIED_GET_APPROVAL_DASHBOARD_SUMMARY_URL",
+        getEnvValue(
+          "VITE_CREATOR_GET_APPROVAL_DASHBOARD_SUMMARY_URL",
+          "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getApprovalDashboardSummary?publickey=QKkMpmbkxqutH7UQwfd9etr9a",
+        ),
       ),
       loadReviewerWorkload: getEnvValue(
-        "VITE_CREATOR_GET_REVIEWER_WORKLOAD_SUMMARY_URL",
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getReviewerWorkloadSummary?publickey=x13yOP1qhqaX7S0rH7Ou8OV9k",
+        "VITE_ZOHO_UNIFIED_GET_REVIEWER_WORKLOAD_SUMMARY_URL",
+        getEnvValue(
+          "VITE_CREATOR_GET_REVIEWER_WORKLOAD_SUMMARY_URL",
+          "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/getReviewerWorkloadSummary?publickey=x13yOP1qhqaX7S0rH7Ou8OV9k",
+        ),
       ),
-      loadInvoiceDetail: getEnvValue("VITE_CREATOR_GET_APPROVAL_DETAIL_URL"),
+      loadInvoiceDetail: getEnvValue(
+        "VITE_ZOHO_UNIFIED_GET_APPROVAL_DETAIL_URL",
+        getEnvValue("VITE_CREATOR_GET_APPROVAL_DETAIL_URL"),
+      ),
       loadCrmContext: getEnvValue("VITE_CREATOR_LOAD_CRM_CONTEXT_URL"),
       refreshBooksInvoiceSnapshot: getEnvValue(
-        "VITE_CREATOR_REFRESH_BOOKS_INVOICE_SNAPSHOT_URL",
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/refreshBooksInvoiceSnapshot?publickey=rCXOYFbfUJM0tT49gstx3CBuZ",
+        "VITE_ZOHO_UNIFIED_REFRESH_INVOICE_SNAPSHOT_URL",
+        getEnvValue(
+          "VITE_CREATOR_REFRESH_BOOKS_INVOICE_SNAPSHOT_URL",
+          "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/refreshBooksInvoiceSnapshot?publickey=rCXOYFbfUJM0tT49gstx3CBuZ",
+        ),
       ),
       validateInvoiceApproval: getEnvValue(
-        "VITE_CREATOR_VALIDATE_INVOICE_APPROVAL_URL",
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/validateInvoiceApproval?publickey=XGyHdFjn9uwEezKWbsD6gbtdH",
+        "VITE_ZOHO_UNIFIED_VALIDATE_INVOICE_APPROVAL_URL",
+        getEnvValue(
+          "VITE_CREATOR_VALIDATE_INVOICE_APPROVAL_URL",
+          "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/validateInvoiceApproval?publickey=XGyHdFjn9uwEezKWbsD6gbtdH",
+        ),
       ),
       assignInvoiceReviewer: getEnvValue(
-        "VITE_CREATOR_ASSIGN_INVOICE_REVIEWER_URL",
-        "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/assignInvoiceReviewer?publickey=Khfzv7BuFEqrBbQYQ2Jx0tORH",
+        "VITE_ZOHO_UNIFIED_ASSIGN_INVOICE_REVIEWER_URL",
+        getEnvValue(
+          "VITE_CREATOR_ASSIGN_INVOICE_REVIEWER_URL",
+          "https://www.zohoapis.com/creator/custom/demo14instawebworkscom/assignInvoiceReviewer?publickey=Khfzv7BuFEqrBbQYQ2Jx0tORH",
+        ),
+      ),
+      checkApprovalEscalations: getEnvValue(
+        "VITE_ZOHO_UNIFIED_CHECK_APPROVAL_ESCALATIONS_URL",
+        getEnvValue("VITE_CREATOR_CHECK_APPROVAL_ESCALATIONS_URL"),
       ),
       approveInvoice: getEnvValue("VITE_CREATOR_APPROVE_INVOICE_URL"),
       rejectInvoice: getEnvValue("VITE_CREATOR_REJECT_INVOICE_URL"),
@@ -127,18 +152,26 @@ function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
       customApis: {
         ...baseConfig.creator.customApis,
         loadInbox:
+          widgetParams.loadUnifiedInboxFunctionName ||
+          widgetParams.getUnifiedApprovalInboxFunctionName ||
           widgetParams.loadInboxFunctionName ||
           widgetParams.getApprovalInboxFunctionName ||
           baseConfig.creator.customApis.loadInbox,
         loadDashboardSummary:
+          widgetParams.loadUnifiedDashboardSummaryFunctionName ||
+          widgetParams.getUnifiedApprovalDashboardSummaryFunctionName ||
           widgetParams.loadDashboardSummaryFunctionName ||
           widgetParams.getApprovalDashboardSummaryFunctionName ||
           baseConfig.creator.customApis.loadDashboardSummary,
         loadReviewerWorkload:
+          widgetParams.loadUnifiedReviewerWorkloadFunctionName ||
+          widgetParams.getUnifiedReviewerWorkloadSummaryFunctionName ||
           widgetParams.loadReviewerWorkloadFunctionName ||
           widgetParams.getReviewerWorkloadSummaryFunctionName ||
           baseConfig.creator.customApis.loadReviewerWorkload,
         loadInvoiceDetail:
+          widgetParams.loadUnifiedInvoiceDetailFunctionName ||
+          widgetParams.getUnifiedApprovalDetailFunctionName ||
           widgetParams.loadInvoiceDetailFunctionName ||
           widgetParams.getApprovalDetailFunctionName ||
           baseConfig.creator.customApis.loadInvoiceDetail,
@@ -147,16 +180,23 @@ function buildConfig(baseConfig, widgetParams = {}, initData = {}) {
           widgetParams.getCrmContextFunctionName ||
           baseConfig.creator.customApis.loadCrmContext,
         refreshBooksInvoiceSnapshot:
+          widgetParams.refreshUnifiedInvoiceSnapshotFunctionName ||
           widgetParams.refreshBooksInvoiceSnapshotFunctionName ||
           widgetParams.refreshBooksSnapshotFunctionName ||
           baseConfig.creator.customApis.refreshBooksInvoiceSnapshot,
         validateInvoiceApproval:
+          widgetParams.validateUnifiedInvoiceApprovalFunctionName ||
           widgetParams.validateInvoiceApprovalFunctionName ||
           widgetParams.validateApprovalFunctionName ||
           baseConfig.creator.customApis.validateInvoiceApproval,
         assignInvoiceReviewer:
+          widgetParams.assignUnifiedInvoiceReviewerFunctionName ||
           widgetParams.assignInvoiceReviewerFunctionName ||
           baseConfig.creator.customApis.assignInvoiceReviewer,
+        checkApprovalEscalations:
+          widgetParams.checkUnifiedApprovalEscalationsFunctionName ||
+          widgetParams.checkApprovalEscalationsFunctionName ||
+          baseConfig.creator.customApis.checkApprovalEscalations,
         approveInvoice:
           widgetParams.approveInvoiceFunctionName ||
           baseConfig.creator.customApis.approveInvoice,

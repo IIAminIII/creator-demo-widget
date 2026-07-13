@@ -65,7 +65,7 @@ export function createMockInvoiceStore() {
       assignmentNote: "Finance lead requested a final scope confirmation before approval.",
       lastActionBy: "System",
       lastActionDate: "2026-06-12T10:00:00Z",
-      lastEventType: "Books Snapshot Refreshed",
+      lastEventType: "Books Refreshed",
       lastComparedAt: "2026-06-13T10:20:00Z",
       differenceFound: false,
       differenceSummary: "No Difference",
@@ -94,7 +94,7 @@ export function createMockInvoiceStore() {
       audit: [
         {
           id: "AUD-1A",
-          eventType: "Books Snapshot Refreshed",
+          eventType: "Books Refreshed",
           summary: "Latest Books snapshot was refreshed for reviewer pickup.",
           actor: "System",
           createdAt: "2026-06-12T10:00:00Z",
@@ -161,14 +161,14 @@ export function createMockInvoiceStore() {
       audit: [
         {
           id: "AUD-2A",
-          eventType: "Books Sync Failed",
+          eventType: "Sync Error",
           summary: "Initial Books refresh failed before the clarification request.",
           actor: "System",
           createdAt: "2026-06-14T09:15:00Z",
         },
         {
           id: "AUD-2",
-          eventType: "Clarification requested",
+          eventType: "Clarification Requested",
           summary: "Approval halted due to missing PO number.",
           actor: "Nabila Noor",
           createdAt: "2026-06-14T13:00:00Z",

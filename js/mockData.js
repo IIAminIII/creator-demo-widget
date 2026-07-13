@@ -77,7 +77,7 @@ export function createMockState() {
       approvalDecisionDate: "",
       lastActionBy: "System",
       lastActionDate: isoDate(-1),
-      lastEventType: "Books Snapshot Refreshed",
+      lastEventType: "Books Refreshed",
       lastBooksSyncAt: isoDate(-1),
       lastCrmEnrichmentAt: isoDate(-1),
       lastComparedAt: isoDate(-1),
@@ -142,7 +142,7 @@ export function createMockState() {
       audit: [
         {
           id: "AUD-1000",
-          eventType: "Books Snapshot Refreshed",
+          eventType: "Books Refreshed",
           previousStatus: "",
           newStatus: "Under Review",
           eventMessage: "Books snapshot refreshed before reviewer pickup.",
@@ -356,7 +356,7 @@ export function createMockState() {
         },
         {
           id: "AUD-1003",
-          eventType: "Record Created",
+          eventType: "Intake Created",
           previousStatus: "",
           newStatus: "New",
           eventMessage: "Approval record created after Books invoice import.",
@@ -390,7 +390,7 @@ export function createMockState() {
       approvalDecisionDate: isoDate(-3),
       lastActionBy: "Finance Controller",
       lastActionDate: isoDate(-3),
-      lastEventType: "Books Sync Failed",
+      lastEventType: "Sync Error",
       lastBooksSyncAt: isoDate(-3),
       lastCrmEnrichmentAt: isoDate(-3),
       lastComparedAt: isoDate(-3),
@@ -432,7 +432,7 @@ export function createMockState() {
       audit: [
         {
           id: "AUD-1004B",
-          eventType: "Books Sync Failed",
+          eventType: "Sync Error",
           previousStatus: "Under Review",
           newStatus: "Under Review",
           eventMessage: "Books refresh failed before final rejection review.",

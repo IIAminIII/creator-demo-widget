@@ -1,9 +1,17 @@
 import { getRuntimeConfig } from "./config.js";
 import { createInvoiceApprovalService } from "./invoiceApprovalService.js";
+import { createInvoiceApprovalAiTools } from "./aiTools.js";
 
 const state = {
   service: null,
   runtimeInfo: null,
+  aiTools: null,
+  aiAssistant: {
+    busy: false,
+    briefing: null,
+    blocker: null,
+    escalation: null,
+  },
   filters: {
     statusFilter: "All",
     syncFilter: "All",
@@ -296,12 +304,16 @@ function getAuditEventPresentation(eventType = "") {
     return { label: "Comment Added", badgeClass: "audit-neutral" };
   }
 
-  if (normalized === "books snapshot refreshed" || normalized === "books refresh") {
+  if (normalized === "books refreshed" || normalized === "books refresh") {
     return { label: "Books Snapshot Refreshed", badgeClass: "audit-info" };
   }
 
-  if (normalized === "books sync failed" || normalized === "books refresh failed") {
+  if (normalized === "sync error" || normalized === "books refresh failed") {
     return { label: "Books Refresh Failed", badgeClass: "audit-danger" };
+  }
+
+  if (normalized === "status changed") {
+    return { label: "Workflow Status Changed", badgeClass: "audit-neutral" };
   }
 
   return { label: eventType || "Activity", badgeClass: "audit-neutral" };
@@ -627,6 +639,116 @@ function renderRetryButton(buttonId, label) {
   return `<button type="button" class="secondary-button" id="${buttonId}">${escapeHtml(
     label,
   )}</button>`;
+}
+
+function renderAssistantInvoiceList(items = [], emptyMessage) {
+  if (!items.length) {
+    return `<div class="section-hint">${escapeHtml(emptyMessage)}</div>`;
+  }
+
+  return `
+    <div class="assistant-list">
+      ${items
+        .slice(0, 5)
+        .map(
+          (item) => `
+            <div class="assistant-list-item">
+              <strong>${escapeHtml(item.invoiceNumber || item.approvalRecordId)}</strong>
+              <span>${escapeHtml(item.customerName || "Unknown customer")}</span>
+              <span>${escapeHtml(item.syncStatus || item.approvalStatus || "Needs review")}</span>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderAiAssistantPanel() {
+  const { briefing, blocker, escalation, busy } = state.aiAssistant;
+
+  return `
+    <article class="detail-card action-card">
+      <div class="section-tag tag-creator">AI Operations Assistant</div>
+      <h3>AI Operations Assistant</h3>
+      <p>
+        Use structured workflow tools to summarize, investigate, and safely prepare invoice approval actions.
+      </p>
+      <div class="action-buttons">
+        <button type="button" class="secondary-button" id="assistant-briefing-button" ${busy ? "disabled" : ""}>
+          Generate Daily Briefing
+        </button>
+        <button type="button" class="secondary-button" id="assistant-blockers-button" ${busy || !state.selectedRecordId ? "disabled" : ""}>
+          Explain Selected Invoice Blockers
+        </button>
+        <button type="button" class="secondary-button" id="assistant-escalation-button" ${busy ? "disabled" : ""}>
+          Prepare Escalation Briefing
+        </button>
+      </div>
+      ${
+        briefing
+          ? `
+            <div class="mini-card">
+              <div class="mini-label">Daily Briefing</div>
+              <div class="assistant-copy">${escapeHtml(briefing.summaryText)}</div>
+              <div class="assistant-bullets">
+                ${briefing.attentionItems
+                  .map((item) => `<div>${escapeHtml(item)}</div>`)
+                  .join("")}
+              </div>
+            </div>
+            <div class="mini-card">
+              <div class="mini-label">Failed Refreshes</div>
+              ${renderAssistantInvoiceList(
+                briefing.failedRefreshes || [],
+                "No failed refreshes are currently queued.",
+              )}
+            </div>
+          `
+          : ""
+      }
+      ${
+        blocker
+          ? `
+            <div class="mini-card">
+              <div class="mini-label">Selected Invoice Blockers</div>
+              <div class="assistant-copy">${escapeHtml(blocker.explanation)}</div>
+              <div class="assistant-bullets">
+                <div>Invoice ${escapeHtml(blocker.invoiceNumber)}</div>
+                <div>Sync ${escapeHtml(blocker.syncStatus || "Unknown")}</div>
+                <div>Payment ${escapeHtml(blocker.paymentStatus || "Unknown")}</div>
+                <div>Difference ${escapeHtml(blocker.differenceSummary || "No difference summary available.")}</div>
+              </div>
+            </div>
+          `
+          : ""
+      }
+      ${
+        escalation
+          ? `
+            <div class="mini-card">
+              <div class="mini-label">Escalation Briefing</div>
+              <div class="assistant-copy">${escapeHtml(escalation.summaryText)}</div>
+            </div>
+            <div class="mini-card">
+              <div class="mini-label">Due Soon</div>
+              ${renderAssistantInvoiceList(
+                escalation.dueSoon || [],
+                "No due-soon invoices need escalation review right now.",
+              )}
+            </div>
+            <div class="mini-card">
+              <div class="mini-label">Escalated</div>
+              ${renderAssistantInvoiceList(
+                escalation.escalated || [],
+                "No escalated invoices are currently flagged.",
+              )}
+            </div>
+          `
+          : ""
+      }
+    </article>
+  `;
 }
 
 function getErrorMessage(error, fallbackMessage) {
@@ -1388,6 +1510,8 @@ function renderDetail() {
         </div>
       </article>
 
+      ${renderAiAssistantPanel()}
+
       <article class="detail-card action-card">
         <div class="section-tag tag-creator">Creator Workflow</div>
         <h3>Approval controls</h3>
@@ -1542,6 +1666,9 @@ function wireDetailActions() {
   const checkApprovalSafetyButton = document.getElementById(
     "check-approval-safety-button",
   );
+  const assistantBriefingButton = document.getElementById("assistant-briefing-button");
+  const assistantBlockersButton = document.getElementById("assistant-blockers-button");
+  const assistantEscalationButton = document.getElementById("assistant-escalation-button");
   const assignReviewerButton = document.getElementById("assign-reviewer-button");
   const approveButton = document.getElementById("approve-button");
   const rejectButton = document.getElementById("reject-button");
@@ -1554,6 +1681,24 @@ function wireDetailActions() {
     comment: commentInput.value.trim(),
     exceptionReason: exceptionInput.value.trim(),
   });
+
+  const runAssistantTask = async (task) => {
+    if (!state.aiTools || state.aiAssistant.busy) {
+      return;
+    }
+
+    state.aiAssistant.busy = true;
+    renderDetail();
+
+    try {
+      await task();
+    } catch (error) {
+      showToast(getErrorMessage(error, "AI assistant action failed."), "error");
+    } finally {
+      state.aiAssistant.busy = false;
+      renderDetail();
+    }
+  };
 
   assignReviewerButton?.addEventListener("click", async () => {
     if (!state.selectedRecordId || state.busyAction) {
@@ -1651,6 +1796,34 @@ function wireDetailActions() {
     } finally {
       state.busyAction = false;
     }
+  });
+
+  assistantBriefingButton?.addEventListener("click", async () => {
+    await runAssistantTask(async () => {
+      state.aiAssistant.briefing = await state.aiTools.buildApprovalBriefing();
+      showToast("Daily approval briefing generated.");
+    });
+  });
+
+  assistantBlockersButton?.addEventListener("click", async () => {
+    if (!state.selectedRecordId) {
+      return;
+    }
+
+    await runAssistantTask(async () => {
+      state.aiAssistant.blocker = await state.aiTools.explainBlockedInvoice(
+        state.selectedRecordId,
+      );
+      showToast("Selected invoice blocker summary updated.");
+    });
+  });
+
+  assistantEscalationButton?.addEventListener("click", async () => {
+    await runAssistantTask(async () => {
+      await state.aiTools.runApprovalEscalationCheck();
+      state.aiAssistant.escalation = await state.aiTools.prepareEscalationBriefing();
+      showToast("Escalation briefing prepared.");
+    });
   });
   approveButton?.addEventListener("click", async () => {
     if (!state.selectedRecordId || state.busyAction) {
@@ -2111,6 +2284,8 @@ async function bootstrap() {
     window.ZOHO?.CREATOR?.UTIL?.getWidgetParams?.() || {};
   state.config = getRuntimeConfig(widgetParams);
   state.service = await createInvoiceApprovalService(state.config);
+  state.aiTools = createInvoiceApprovalAiTools(state.service);
+  window.invoiceApprovalAiTools = state.aiTools;
   state.runtimeInfo = await state.service.init();
   updateRuntimeHeader();
   bindToolbar();
