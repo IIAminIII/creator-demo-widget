@@ -564,15 +564,20 @@ export function createInvoiceApprovalAiTools(service) {
 
   async function answerReviewerQuery({ prompt, approvalRecordId, filters = {} }) {
     const normalizedPrompt = normalizeText(prompt).toLowerCase();
-    const needsSelectedInvoice =
+    const asksForSelectedInvoiceSummary =
       normalizedPrompt.includes("this invoice") ||
       normalizedPrompt.includes("selected invoice") ||
+      normalizedPrompt.includes("invoice summary") ||
+      normalizedPrompt.includes("summarize this invoice") ||
+      normalizedPrompt.includes("summarise this invoice") ||
+      normalizedPrompt.includes("invoice detail");
+    const needsSelectedInvoice =
+      asksForSelectedInvoiceSummary ||
       normalizedPrompt.includes("approve") ||
       normalizedPrompt.includes("block") ||
       normalizedPrompt.includes("difference") ||
       normalizedPrompt.includes("line item") ||
       normalizedPrompt.includes("line-item") ||
-      normalizedPrompt.includes("invoice detail") ||
       normalizedPrompt.includes("why");
 
     if (needsSelectedInvoice && !approvalRecordId) {
@@ -586,9 +591,27 @@ export function createInvoiceApprovalAiTools(service) {
     }
 
     if (
+      asksForSelectedInvoiceSummary ||
+      normalizedPrompt.includes("selected") ||
+      normalizedPrompt.includes("detail") ||
+      normalizedPrompt.includes("status")
+    ) {
+      const [detail, validation] = await Promise.all([
+        service.loadInvoiceDetail(approvalRecordId),
+        approvalRecordId ? service.validateInvoiceApproval(approvalRecordId) : Promise.resolve(null),
+      ]);
+      const reply = summarizeInvoiceDetail(detail, validation);
+      return withResult(true, reply.summary, {
+        ...reply,
+        data: detail,
+        guardrailCheck: validation,
+      });
+    }
+
+    if (
       normalizedPrompt.includes("briefing") ||
       normalizedPrompt.includes("dashboard") ||
-      normalizedPrompt.includes("summary") ||
+      (normalizedPrompt.includes("summary") && !approvalRecordId) ||
       normalizedPrompt.includes("overview")
     ) {
       const briefing = await buildApprovalBriefing();
@@ -683,40 +706,26 @@ export function createInvoiceApprovalAiTools(service) {
       });
     }
 
-    if (
-      normalizedPrompt.includes("selected") ||
-      normalizedPrompt.includes("detail") ||
-      normalizedPrompt.includes("status") ||
-      approvalRecordId
-    ) {
-      const [detail, validation] = await Promise.all([
-        service.loadInvoiceDetail(approvalRecordId),
-        approvalRecordId ? service.validateInvoiceApproval(approvalRecordId) : Promise.resolve(null),
-      ]);
-      const reply = summarizeInvoiceDetail(detail, validation);
-      return withResult(true, reply.summary, {
-        ...reply,
-        data: detail,
-        guardrailCheck: validation,
-      });
-    }
-
-    const dashboard = await service.loadDashboardSummary();
-    return withResult(true, "I pulled the latest approval dashboard summary.", {
-      title: "Approval dashboard",
-      summary: `There are ${dashboard?.approvalSummary?.pending ?? 0} pending approval(s), ${dashboard?.syncSummary?.failed ?? 0} failed refresh(es), and ${dashboard?.agingSummary?.dueSoon ?? 0} due-soon invoice(s).`,
-      bullets: [
-        `Pending: ${dashboard?.approvalSummary?.pending ?? 0}`,
-        `Manual review: ${dashboard?.syncSummary?.manualReview ?? 0}`,
-        `Failed refresh: ${dashboard?.syncSummary?.failed ?? 0}`,
-        `Overdue: ${dashboard?.agingSummary?.overdueDueDate ?? 0}`,
-      ],
+    return withResult(false, "I can answer only from live approval data. Try one of the supported questions below.", {
+      title: "Supported assistant questions",
+      summary:
+        "Ask for a daily briefing, escalation risks, reviewer workload, line items, selected invoice summary, or why the selected invoice is blocked.",
+      bullets: approvalRecordId
+        ? [
+            "Why is this invoice blocked?",
+            "Show me the line items.",
+            "Summarize this invoice.",
+          ]
+        : [
+            "Give me a daily briefing.",
+            "Show escalation risks.",
+            "Show reviewer workload.",
+          ],
       suggestions: [
-        "Ask for daily briefing.",
-        "Ask for escalation summary.",
-        "Select an invoice and ask why it is blocked.",
+        approvalRecordId ? "Why is this invoice blocked?" : "Give me a daily briefing.",
+        approvalRecordId ? "Show me the line items." : "Show escalation risks.",
+        approvalRecordId ? "Summarize this invoice." : "Show reviewer workload.",
       ],
-      data: dashboard,
     });
   }
 

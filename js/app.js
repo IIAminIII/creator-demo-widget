@@ -1915,7 +1915,10 @@ function wireDetailActions() {
     button.addEventListener("click", () => {
       const suggestion = button.getAttribute("data-assistant-suggestion") || "";
       state.aiAssistant.prompt = suggestion;
-      renderDetail();
+      if (assistantPromptInput) {
+        assistantPromptInput.value = suggestion;
+        assistantPromptInput.focus();
+      }
     });
   });
   approveButton?.addEventListener("click", async () => {
@@ -2169,8 +2172,8 @@ async function loadDetailWithOptions(recordId, options = {}) {
   } finally {
     if (!silent) {
       state.loadingDetail = false;
+      renderDetail();
     }
-    renderDetail();
   }
 }
 
