@@ -662,6 +662,117 @@ button {
   font-size: 13px;
 }
 
+.assistant-chat-shell {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface-muted);
+}
+
+.assistant-chat-log {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.assistant-chat-bubble {
+  max-width: calc(100% - 40px);
+  padding: 12px 14px;
+  border-radius: 18px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.assistant-chat-assistant {
+  margin-right: auto;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+}
+
+.assistant-chat-user {
+  margin-left: auto;
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  color: #fff;
+}
+
+.assistant-chat-warning {
+  margin-right: auto;
+  border: 1px solid rgba(197, 133, 18, 0.24);
+  background: var(--warning-soft);
+  color: #7c4a00;
+}
+
+.assistant-chat-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.assistant-chat-summary {
+  margin-top: 4px;
+}
+
+.assistant-chat-bullets {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.assistant-chat-suggestions,
+.assistant-chat-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assistant-suggestion-button,
+.assistant-quick-button {
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.assistant-chat-user .assistant-suggestion-button {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.assistant-chat-compose {
+  display: grid;
+  gap: 10px;
+}
+
+.assistant-chat-compose textarea {
+  width: 100%;
+  min-height: 110px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #fff;
+  color: var(--text);
+  resize: vertical;
+  outline: none;
+}
+
+.assistant-chat-compose textarea:focus {
+  border-color: #b9c8e5;
+  box-shadow: 0 0 0 4px rgba(41, 89, 214, 0.08);
+}
+
 .snapshot-table {
   width: 100%;
   border-collapse: collapse;

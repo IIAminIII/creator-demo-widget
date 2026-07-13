@@ -8,9 +8,21 @@ const state = {
   aiTools: null,
   aiAssistant: {
     busy: false,
-    briefing: null,
-    blocker: null,
-    escalation: null,
+    messages: [
+      {
+        id: "assistant-intro-empty",
+        role: "assistant",
+        title: "Approval Copilot",
+        summary:
+          "Ask for a daily briefing, escalation risks, reviewer workload, or select an invoice and ask why it is blocked.",
+        suggestions: [
+          "Give me a daily briefing.",
+          "Show escalation risks.",
+          "Show reviewer workload.",
+        ],
+      },
+    ],
+    prompt: "",
   },
   filters: {
     statusFilter: "All",
@@ -664,89 +676,137 @@ function renderAssistantInvoiceList(items = [], emptyMessage) {
   `;
 }
 
+function createAssistantIntroMessage(detail = null) {
+  if (detail?.invoice?.invoiceNumber || detail?.invoiceNumber) {
+    const invoiceNumber = detail?.invoice?.invoiceNumber || detail?.invoiceNumber;
+    const approvalRecordId = detail?.approvalRecordId || invoiceNumber;
+    return {
+      id: `assistant-intro-${approvalRecordId}`,
+      role: "assistant",
+      title: "Approval Copilot",
+      summary: `Ask about ${invoiceNumber}. I answer from the current Creator workflow data, Books snapshot, and reviewer workload records.`,
+      suggestions: [
+        "Why is this invoice blocked?",
+        "Show me the line items.",
+        "Summarize approval risks.",
+      ],
+    };
+  }
+
+  return {
+    id: "assistant-intro-empty",
+    role: "assistant",
+    title: "Approval Copilot",
+    summary:
+      "Ask for a daily briefing, escalation risks, reviewer workload, or select an invoice and ask why it is blocked.",
+    suggestions: [
+      "Give me a daily briefing.",
+      "Show escalation risks.",
+      "Show reviewer workload.",
+    ],
+  };
+}
+
 function renderAiAssistantPanel() {
-  const { briefing, blocker, escalation, busy } = state.aiAssistant;
+  const { messages = [], busy, prompt = "" } = state.aiAssistant;
+  const suggestedPrompts = state.selectedDetail
+    ? [
+        "Why is this invoice blocked?",
+        "Show me the line items.",
+        "Summarize approval risks.",
+      ]
+    : [
+        "Give me a daily briefing.",
+        "Show escalation risks.",
+        "Show reviewer workload.",
+      ];
 
   return `
     <article class="detail-card action-card">
       <div class="section-tag tag-creator">AI Operations Assistant</div>
-      <h3>AI Operations Assistant</h3>
+      <h3>Approval Copilot</h3>
       <p>
-        Use structured workflow tools to summarize, investigate, and safely prepare invoice approval actions.
+        Ask questions in plain language and get replies generated from live Creator approval data, Books snapshots, and reviewer workload records.
       </p>
-      <div class="action-buttons">
-        <button type="button" class="secondary-button" id="assistant-briefing-button" ${busy ? "disabled" : ""}>
-          Generate Daily Briefing
-        </button>
-        <button type="button" class="secondary-button" id="assistant-blockers-button" ${busy || !state.selectedRecordId ? "disabled" : ""}>
-          Explain Selected Invoice Blockers
-        </button>
-        <button type="button" class="secondary-button" id="assistant-escalation-button" ${busy ? "disabled" : ""}>
-          Prepare Escalation Briefing
-        </button>
+      <div class="assistant-chat-shell">
+        <div class="assistant-chat-log">
+          ${messages
+            .map(
+              (message) => `
+                <div class="assistant-chat-bubble ${
+                  message.role === "user"
+                    ? "assistant-chat-user"
+                    : message.tone === "warning"
+                      ? "assistant-chat-warning"
+                      : "assistant-chat-assistant"
+                }">
+                  ${
+                    message.title
+                      ? `<div class="assistant-chat-title">${escapeHtml(message.title)}</div>`
+                      : ""
+                  }
+                  <div class="assistant-chat-summary">${escapeHtml(message.summary || "")}</div>
+                  ${
+                    Array.isArray(message.bullets) && message.bullets.length
+                      ? `<div class="assistant-chat-bullets">
+                          ${message.bullets
+                            .map((bullet) => `<div>${escapeHtml(bullet)}</div>`)
+                            .join("")}
+                        </div>`
+                      : ""
+                  }
+                  ${
+                    Array.isArray(message.suggestions) && message.suggestions.length
+                      ? `<div class="assistant-chat-suggestions">
+                          ${message.suggestions
+                            .map(
+                              (suggestion) => `
+                                <button type="button" class="assistant-suggestion-button" data-assistant-suggestion="${escapeHtml(
+                                  suggestion,
+                                )}">
+                                  ${escapeHtml(suggestion)}
+                                </button>
+                              `,
+                            )
+                            .join("")}
+                        </div>`
+                      : ""
+                  }
+                </div>
+              `,
+            )
+            .join("")}
+          ${
+            busy
+              ? `<div class="assistant-chat-bubble assistant-chat-assistant">
+                  <div class="assistant-chat-title">Approval Copilot</div>
+                  <div class="assistant-chat-summary">Generating a data-backed reply...</div>
+                </div>`
+              : ""
+          }
+        </div>
+        <div class="assistant-chat-quick">
+          ${suggestedPrompts
+            .map(
+              (suggestion) => `
+                <button type="button" class="assistant-quick-button" data-assistant-suggestion="${escapeHtml(
+                  suggestion,
+                )}">
+                  ${escapeHtml(suggestion)}
+                </button>
+              `,
+            )
+            .join("")}
+        </div>
+        <div class="assistant-chat-compose">
+          <textarea id="assistant-prompt-input" placeholder="Ask things like: why is this invoice blocked, show the line items, give me a daily briefing...">${escapeHtml(
+            prompt,
+          )}</textarea>
+          <button type="button" class="secondary-button" id="assistant-send-button" ${busy ? "disabled" : ""}>
+            ${busy ? "Generating..." : "Send"}
+          </button>
+        </div>
       </div>
-      ${
-        briefing
-          ? `
-            <div class="mini-card">
-              <div class="mini-label">Daily Briefing</div>
-              <div class="assistant-copy">${escapeHtml(briefing.summaryText)}</div>
-              <div class="assistant-bullets">
-                ${briefing.attentionItems
-                  .map((item) => `<div>${escapeHtml(item)}</div>`)
-                  .join("")}
-              </div>
-            </div>
-            <div class="mini-card">
-              <div class="mini-label">Failed Refreshes</div>
-              ${renderAssistantInvoiceList(
-                briefing.failedRefreshes || [],
-                "No failed refreshes are currently queued.",
-              )}
-            </div>
-          `
-          : ""
-      }
-      ${
-        blocker
-          ? `
-            <div class="mini-card">
-              <div class="mini-label">Selected Invoice Blockers</div>
-              <div class="assistant-copy">${escapeHtml(blocker.explanation)}</div>
-              <div class="assistant-bullets">
-                <div>Invoice ${escapeHtml(blocker.invoiceNumber)}</div>
-                <div>Sync ${escapeHtml(blocker.syncStatus || "Unknown")}</div>
-                <div>Payment ${escapeHtml(blocker.paymentStatus || "Unknown")}</div>
-                <div>Difference ${escapeHtml(blocker.differenceSummary || "No difference summary available.")}</div>
-              </div>
-            </div>
-          `
-          : ""
-      }
-      ${
-        escalation
-          ? `
-            <div class="mini-card">
-              <div class="mini-label">Escalation Briefing</div>
-              <div class="assistant-copy">${escapeHtml(escalation.summaryText)}</div>
-            </div>
-            <div class="mini-card">
-              <div class="mini-label">Due Soon</div>
-              ${renderAssistantInvoiceList(
-                escalation.dueSoon || [],
-                "No due-soon invoices need escalation review right now.",
-              )}
-            </div>
-            <div class="mini-card">
-              <div class="mini-label">Escalated</div>
-              ${renderAssistantInvoiceList(
-                escalation.escalated || [],
-                "No escalated invoices are currently flagged.",
-              )}
-            </div>
-          `
-          : ""
-      }
     </article>
   `;
 }
@@ -1666,9 +1726,8 @@ function wireDetailActions() {
   const checkApprovalSafetyButton = document.getElementById(
     "check-approval-safety-button",
   );
-  const assistantBriefingButton = document.getElementById("assistant-briefing-button");
-  const assistantBlockersButton = document.getElementById("assistant-blockers-button");
-  const assistantEscalationButton = document.getElementById("assistant-escalation-button");
+  const assistantPromptInput = document.getElementById("assistant-prompt-input");
+  const assistantSendButton = document.getElementById("assistant-send-button");
   const assignReviewerButton = document.getElementById("assign-reviewer-button");
   const approveButton = document.getElementById("approve-button");
   const rejectButton = document.getElementById("reject-button");
@@ -1698,6 +1757,45 @@ function wireDetailActions() {
       state.aiAssistant.busy = false;
       renderDetail();
     }
+  };
+
+  const sendAssistantPrompt = async (promptOverride = "") => {
+    const prompt = normalizeText(promptOverride || assistantPromptInput?.value || state.aiAssistant.prompt);
+
+    if (!prompt) {
+      return;
+    }
+
+    state.aiAssistant.messages.push({
+      id: `assistant-user-${Date.now()}`,
+      role: "user",
+      summary: prompt,
+    });
+    state.aiAssistant.prompt = "";
+    renderDetail();
+
+    await runAssistantTask(async () => {
+      const response = await state.aiTools.answerReviewerQuery({
+        prompt,
+        approvalRecordId: state.selectedRecordId,
+        filters: state.filters,
+      });
+
+      if (response.guardrailCheck) {
+        state.guardrailCheck = response.guardrailCheck;
+      }
+
+      state.aiAssistant.messages.push({
+        id: `assistant-reply-${Date.now()}`,
+        role: "assistant",
+        title: response.title || "Approval Copilot",
+        summary: response.summary || response.message,
+        bullets: response.bullets || [],
+        suggestions: response.suggestions || [],
+        tone: response.ok ? "neutral" : "warning",
+      });
+      renderDetail();
+    });
   };
 
   assignReviewerButton?.addEventListener("click", async () => {
@@ -1798,31 +1896,26 @@ function wireDetailActions() {
     }
   });
 
-  assistantBriefingButton?.addEventListener("click", async () => {
-    await runAssistantTask(async () => {
-      state.aiAssistant.briefing = await state.aiTools.buildApprovalBriefing();
-      showToast("Daily approval briefing generated.");
-    });
+  assistantPromptInput?.addEventListener("input", (event) => {
+    state.aiAssistant.prompt = event.target.value;
   });
 
-  assistantBlockersButton?.addEventListener("click", async () => {
-    if (!state.selectedRecordId) {
-      return;
+  assistantPromptInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void sendAssistantPrompt();
     }
-
-    await runAssistantTask(async () => {
-      state.aiAssistant.blocker = await state.aiTools.explainBlockedInvoice(
-        state.selectedRecordId,
-      );
-      showToast("Selected invoice blocker summary updated.");
-    });
   });
 
-  assistantEscalationButton?.addEventListener("click", async () => {
-    await runAssistantTask(async () => {
-      await state.aiTools.runApprovalEscalationCheck();
-      state.aiAssistant.escalation = await state.aiTools.prepareEscalationBriefing();
-      showToast("Escalation briefing prepared.");
+  assistantSendButton?.addEventListener("click", () => {
+    void sendAssistantPrompt();
+  });
+
+  document.querySelectorAll("[data-assistant-suggestion]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const suggestion = button.getAttribute("data-assistant-suggestion") || "";
+      state.aiAssistant.prompt = suggestion;
+      renderDetail();
     });
   });
   approveButton?.addEventListener("click", async () => {
@@ -2049,6 +2142,8 @@ async function loadDetailWithOptions(recordId, options = {}) {
     state.selectedDetail = null;
     state.detailError = null;
     state.guardrailCheck = null;
+    state.aiAssistant.messages = [createAssistantIntroMessage()];
+    state.aiAssistant.prompt = "";
     renderDetail();
     return;
   }
@@ -2064,6 +2159,8 @@ async function loadDetailWithOptions(recordId, options = {}) {
   try {
     state.selectedDetail = await state.service.loadInvoiceDetail(recordId);
     state.guardrailCheck = null;
+    state.aiAssistant.messages = [createAssistantIntroMessage(state.selectedDetail)];
+    state.aiAssistant.prompt = "";
   } catch (error) {
     state.detailError = error;
     if (!silent) {

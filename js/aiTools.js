@@ -108,6 +108,87 @@ function normalizeBriefingItem(item = {}) {
   };
 }
 
+function summarizeLineItems(detail = {}) {
+  const invoice = getInvoiceSection(detail);
+  const lineItems = Array.isArray(detail?.lineItems) ? detail.lineItems : [];
+
+  if (!lineItems.length) {
+    return {
+      title: "Invoice line items",
+      summary: "No line items were found for the selected invoice.",
+      bullets: [],
+      suggestions: ["Refresh from Books to pull the latest invoice snapshot."],
+    };
+  }
+
+  return {
+    title: "Invoice line items",
+    summary: `${invoice.invoiceNumber || "This invoice"} currently shows ${lineItems.length} line item(s) from the linked Books snapshot.`,
+    bullets: lineItems.slice(0, 5).map((line) => {
+      const quantity = Number(line.quantity || 0);
+      const rate = Number(line.rate || 0);
+      const total = Number(line.total || line.itemTotal || 0);
+      return `${line.name || "Item"}: qty ${quantity}, rate ${rate}, total ${total}.`;
+    }),
+    suggestions:
+      lineItems.length > 5
+        ? ["The reply shows the first 5 line items. Open the table for the full list."]
+        : [],
+  };
+}
+
+function summarizeInvoiceDetail(detail = {}, validation = null) {
+  const invoice = getInvoiceSection(detail);
+  const approval = getApprovalSection(detail);
+  const differenceSummary = buildDifferenceGuidance(detail, validation);
+  const canApprove = validation?.canApprove;
+
+  return {
+    title: "Selected invoice summary",
+    summary: `${invoice.invoiceNumber || detail.approvalRecordId || "Selected invoice"} for ${invoice.customerName || "Unknown customer"} is ${approval.approvalStatus || "Unknown"} with ${approval.syncStatus || "Unknown"} sync status and ${invoice.paymentStatus || "Unknown"} payment status.`,
+    bullets: [
+      `Invoice total: ${Number(invoice.invoiceTotal || 0)} ${invoice.currencyCode || "USD"}.`,
+      `Due date: ${invoice.dueDate || "Not available"}.`,
+      `Assigned reviewer: ${approval.assignedReviewer || "Unassigned"}.`,
+      `Difference review: ${differenceSummary}`,
+      `Approval safety: ${canApprove === false ? "Blocked" : validation?.warningReasons?.length ? "Manual review still recommended" : "No active approval block detected"}.`,
+    ],
+    suggestions: [
+      "Ask why approval is blocked.",
+      "Ask for line items.",
+      "Ask for escalation summary.",
+    ],
+  };
+}
+
+function summarizeWorkload(workload = []) {
+  const reviewers = Array.isArray(workload) ? workload : [];
+
+  if (!reviewers.length) {
+    return {
+      title: "Reviewer workload",
+      summary: "No reviewer workload data is available right now.",
+      bullets: [],
+      suggestions: [],
+    };
+  }
+
+  const top = reviewers
+    .slice()
+    .sort((left, right) => Number(right.pendingCount || 0) - Number(left.pendingCount || 0))
+    .slice(0, 4);
+
+  return {
+    title: "Reviewer workload",
+    summary: `${reviewers.length} reviewer workload record(s) were loaded from the approval workspace.`,
+    bullets: top.map(
+      (entry) =>
+        `${entry.reviewerName || "Unassigned"}: ${entry.pendingCount || 0} pending, ${entry.needsClarificationCount || 0} clarification, review amount ${Number(entry.reviewAmount || 0)}.`,
+    ),
+    suggestions: ["Use the reviewer filter to focus on one reviewer from the inbox."],
+  };
+}
+
 export function createInvoiceApprovalAiTools(service) {
   async function getInvoiceApprovalDashboard() {
     try {
@@ -481,6 +562,164 @@ export function createInvoiceApprovalAiTools(service) {
     };
   }
 
+  async function answerReviewerQuery({ prompt, approvalRecordId, filters = {} }) {
+    const normalizedPrompt = normalizeText(prompt).toLowerCase();
+    const needsSelectedInvoice =
+      normalizedPrompt.includes("this invoice") ||
+      normalizedPrompt.includes("selected invoice") ||
+      normalizedPrompt.includes("approve") ||
+      normalizedPrompt.includes("block") ||
+      normalizedPrompt.includes("difference") ||
+      normalizedPrompt.includes("line item") ||
+      normalizedPrompt.includes("line-item") ||
+      normalizedPrompt.includes("invoice detail") ||
+      normalizedPrompt.includes("why");
+
+    if (needsSelectedInvoice && !approvalRecordId) {
+      return withResult(false, "Select an invoice first so I can answer that with live approval data.", {
+        title: "Invoice selection needed",
+        suggestions: [
+          "Select an invoice, then ask why it is blocked.",
+          "Select an invoice, then ask for line items.",
+        ],
+      });
+    }
+
+    if (
+      normalizedPrompt.includes("briefing") ||
+      normalizedPrompt.includes("dashboard") ||
+      normalizedPrompt.includes("summary") ||
+      normalizedPrompt.includes("overview")
+    ) {
+      const briefing = await buildApprovalBriefing();
+      return withResult(true, briefing.summaryText, {
+        title: "Daily approval briefing",
+        summary: briefing.summaryText,
+        bullets: briefing.attentionItems,
+        suggestions: ["Ask for escalation risks.", "Ask for reviewer workload."],
+        data: briefing,
+      });
+    }
+
+    if (
+      normalizedPrompt.includes("escalat") ||
+      normalizedPrompt.includes("due soon") ||
+      normalizedPrompt.includes("overdue")
+    ) {
+      await runApprovalEscalationCheck();
+      const escalation = await prepareEscalationBriefing();
+      return withResult(true, escalation.summaryText, {
+        title: "Escalation briefing",
+        summary: escalation.summaryText,
+        bullets: [
+          `${escalation.dueSoon.length} invoice(s) are due soon.`,
+          `${escalation.escalated.length} invoice(s) are escalated or at risk.`,
+        ],
+        suggestions: ["Ask for reviewer workload.", "Ask for the selected invoice summary."],
+        data: escalation,
+      });
+    }
+
+    if (
+      normalizedPrompt.includes("reviewer") ||
+      normalizedPrompt.includes("workload") ||
+      normalizedPrompt.includes("assignee")
+    ) {
+      const workload = await service.loadReviewerWorkload();
+      const reply = summarizeWorkload(workload);
+      return withResult(true, reply.summary, {
+        ...reply,
+        data: workload,
+      });
+    }
+
+    if (
+      normalizedPrompt.includes("line item") ||
+      normalizedPrompt.includes("line-item") ||
+      normalizedPrompt.includes("charges") ||
+      normalizedPrompt.includes("items")
+    ) {
+      const detail = await service.loadInvoiceDetail(approvalRecordId);
+      const reply = summarizeLineItems(detail);
+      return withResult(true, reply.summary, {
+        ...reply,
+        data: detail.lineItems,
+      });
+    }
+
+    if (
+      normalizedPrompt.includes("block") ||
+      normalizedPrompt.includes("why can't") ||
+      normalizedPrompt.includes("why cant") ||
+      normalizedPrompt.includes("safe") ||
+      normalizedPrompt.includes("approve") ||
+      normalizedPrompt.includes("difference")
+    ) {
+      const explanation = await explainBlockedInvoice(approvalRecordId);
+      return withResult(true, explanation.explanation, {
+        title: explanation.canApprove ? "Approval review" : "Approval blocker review",
+        summary: explanation.explanation,
+        bullets: [
+          ...explanation.blockingReasons,
+          ...explanation.warningReasons,
+          `Sync status: ${explanation.syncStatus || "Unknown"}.`,
+          `Books payment status: ${explanation.paymentStatus || "Unknown"}.`,
+        ],
+        suggestions: [
+          "Refresh from Books if the sync is stale.",
+          "Open the sync card to compare the changed fields.",
+        ],
+        data: explanation,
+        guardrailCheck: {
+          canApprove: explanation.canApprove,
+          blockingReasons: explanation.blockingReasons,
+          warningReasons: explanation.warningReasons,
+          message: explanation.booksSyncMessage,
+          syncStatus: explanation.syncStatus,
+          booksPaymentStatus: explanation.paymentStatus,
+          lastBooksSyncAt: explanation.lastBooksSyncAt,
+          lastComparedAt: explanation.lastComparedAt,
+        },
+      });
+    }
+
+    if (
+      normalizedPrompt.includes("selected") ||
+      normalizedPrompt.includes("detail") ||
+      normalizedPrompt.includes("status") ||
+      approvalRecordId
+    ) {
+      const [detail, validation] = await Promise.all([
+        service.loadInvoiceDetail(approvalRecordId),
+        approvalRecordId ? service.validateInvoiceApproval(approvalRecordId) : Promise.resolve(null),
+      ]);
+      const reply = summarizeInvoiceDetail(detail, validation);
+      return withResult(true, reply.summary, {
+        ...reply,
+        data: detail,
+        guardrailCheck: validation,
+      });
+    }
+
+    const dashboard = await service.loadDashboardSummary();
+    return withResult(true, "I pulled the latest approval dashboard summary.", {
+      title: "Approval dashboard",
+      summary: `There are ${dashboard?.approvalSummary?.pending ?? 0} pending approval(s), ${dashboard?.syncSummary?.failed ?? 0} failed refresh(es), and ${dashboard?.agingSummary?.dueSoon ?? 0} due-soon invoice(s).`,
+      bullets: [
+        `Pending: ${dashboard?.approvalSummary?.pending ?? 0}`,
+        `Manual review: ${dashboard?.syncSummary?.manualReview ?? 0}`,
+        `Failed refresh: ${dashboard?.syncSummary?.failed ?? 0}`,
+        `Overdue: ${dashboard?.agingSummary?.overdueDueDate ?? 0}`,
+      ],
+      suggestions: [
+        "Ask for daily briefing.",
+        "Ask for escalation summary.",
+        "Select an invoice and ask why it is blocked.",
+      ],
+      data: dashboard,
+    });
+  }
+
   return {
     getInvoiceApprovalDashboard,
     findInvoiceApprovals,
@@ -498,5 +737,6 @@ export function createInvoiceApprovalAiTools(service) {
     explainBlockedInvoice,
     prepareReviewerAssignmentPreview,
     prepareEscalationBriefing,
+    answerReviewerQuery,
   };
 }
