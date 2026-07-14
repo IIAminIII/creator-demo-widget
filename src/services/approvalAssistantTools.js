@@ -11,6 +11,34 @@ function normalizeCompareText(value) {
   return normalizeText(value).replace(/[^a-z0-9]/gi, "").toUpperCase();
 }
 
+function firstText(...values) {
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function toSentenceCaseFromEmail(email) {
+  const localPart = String(email || "")
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .trim();
+
+  if (!localPart) {
+    return "Assigned Reviewer";
+  }
+
+  return localPart
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
+
 function createAssistantMessage(content, data) {
   return {
     role: "assistant",
@@ -222,6 +250,254 @@ export async function findInvoiceByNumber(service, invoiceNumber) {
   };
 }
 
+export async function prepareRefreshInvoiceFromBooks(service, invoiceNumber) {
+  const matchedInvoice = await findInvoiceByNumber(service, invoiceNumber);
+
+  if (!matchedInvoice) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+      pendingAction: null,
+    };
+  }
+
+  return {
+    ok: true,
+    requiresConfirmation: true,
+    message: `Ready to refresh ${matchedInvoice.detail.invoiceNumber} from Books through the Creator workflow. Reply yes to continue or no to cancel.`,
+    pendingAction: {
+      type: "refresh-invoice-from-books",
+      label: `Refresh ${matchedInvoice.detail.invoiceNumber} from Books`,
+      payload: {
+        approvalRecordId: matchedInvoice.approvalRecordId,
+        invoiceNumber: matchedInvoice.detail.invoiceNumber,
+      },
+    },
+  };
+}
+
+export function prepareRunEscalationCheck() {
+  return {
+    ok: true,
+    requiresConfirmation: true,
+    message: "Ready to run the escalation check through the Creator workflow. Reply yes to continue or no to cancel.",
+    pendingAction: {
+      type: "run-escalation-check",
+      label: "Run escalation check",
+      payload: {},
+    },
+  };
+}
+
+export async function prepareAddInvoiceComment(service, invoiceNumber, comment) {
+  const matchedInvoice = await findInvoiceByNumber(service, invoiceNumber);
+  const normalizedComment = normalizeText(comment);
+
+  if (!matchedInvoice) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+      pendingAction: null,
+    };
+  }
+
+  if (!normalizedComment) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: "Add comment requires comment text after the invoice number.",
+      pendingAction: null,
+    };
+  }
+
+  return {
+    ok: true,
+    requiresConfirmation: true,
+    message: `Ready to add a comment to ${matchedInvoice.detail.invoiceNumber}: "${normalizedComment}". Reply yes to continue or no to cancel.`,
+    pendingAction: {
+      type: "add-invoice-comment",
+      label: `Add comment to ${matchedInvoice.detail.invoiceNumber}`,
+      payload: {
+        approvalRecordId: matchedInvoice.approvalRecordId,
+        invoiceNumber: matchedInvoice.detail.invoiceNumber,
+        comment: normalizedComment,
+        reviewer: "AI Operations Assistant",
+        commentType: "Internal note",
+      },
+    },
+  };
+}
+
+export async function prepareAssignReviewer(service, invoiceNumber, reviewerEmail) {
+  const matchedInvoice = await findInvoiceByNumber(service, invoiceNumber);
+  const normalizedReviewerEmail = normalizeText(reviewerEmail).toLowerCase();
+
+  if (!matchedInvoice) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+      pendingAction: null,
+    };
+  }
+
+  if (!normalizedReviewerEmail) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: "Assign reviewer requires a reviewer email address.",
+      pendingAction: null,
+    };
+  }
+
+  return {
+    ok: true,
+    requiresConfirmation: true,
+    message: `Ready to assign ${matchedInvoice.detail.invoiceNumber} to ${normalizedReviewerEmail}. Reply yes to continue or no to cancel.`,
+    pendingAction: {
+      type: "assign-reviewer",
+      label: `Assign ${matchedInvoice.detail.invoiceNumber} to ${normalizedReviewerEmail}`,
+      payload: {
+        approvalRecordId: matchedInvoice.approvalRecordId,
+        invoiceNumber: matchedInvoice.detail.invoiceNumber,
+        reviewerEmail: normalizedReviewerEmail,
+        reviewerName: toSentenceCaseFromEmail(normalizedReviewerEmail),
+      },
+    },
+  };
+}
+
+export async function executePendingAssistantAction(service, pendingAction) {
+  if (!pendingAction?.type) {
+    return createAssistantMessage("There is no pending assistant action to run.", {
+      type: "warning",
+      tone: "warning",
+    });
+  }
+
+  switch (pendingAction.type) {
+    case "refresh-invoice-from-books": {
+      const refreshMethod =
+        service.refreshBooksInvoice ||
+        service.refreshBooksInvoiceSnapshot ||
+        service.refreshInvoiceFromBooks ||
+        service.refreshInvoice;
+
+      if (typeof refreshMethod !== "function") {
+        throw new Error("Refresh from Books is not configured in the current service.");
+      }
+
+      await refreshMethod.call(service, pendingAction.payload.approvalRecordId);
+
+      return createAssistantMessage(
+        `${pendingAction.payload.invoiceNumber} was refreshed from Books through Creator.`,
+        {
+          type: "action-result",
+          tone: "success",
+          approvalRecordId: pendingAction.payload.approvalRecordId,
+          refreshScope: {
+            inbox: true,
+            dashboardSummary: true,
+            detail: true,
+            reviewerWorkload: false,
+          },
+        },
+      );
+    }
+    case "run-escalation-check": {
+      const escalations = await service.checkApprovalEscalations();
+      const reviewerWorkload = await service.loadReviewerWorkload();
+      const escalatedItems = Array.isArray(escalations?.escalatedItems)
+        ? escalations.escalatedItems
+        : [];
+      const dueSoonItems = Array.isArray(escalations?.dueSoonItems)
+        ? escalations.dueSoonItems
+        : [];
+
+      return createAssistantMessage(
+        firstText(
+          escalations?.message,
+          `Escalation check completed with ${escalatedItems.length} escalated invoices and ${dueSoonItems.length} due soon invoices.`,
+        ),
+        {
+          type: "escalation-briefing",
+          tone: "success",
+          escalatedItems: escalatedItems.slice(0, MAX_LIST_ITEMS).map(normalizeInvoiceItem),
+          dueSoonItems: dueSoonItems.slice(0, MAX_LIST_ITEMS).map(normalizeInvoiceItem),
+          reviewerWorkload: (Array.isArray(reviewerWorkload) ? reviewerWorkload : [])
+            .slice(0, MAX_WORKLOAD_ITEMS)
+            .map(normalizeReviewerWorkloadItem),
+          checkedAt: escalations?.checkedAt || "",
+          refreshScope: {
+            inbox: true,
+            dashboardSummary: true,
+            detail: false,
+            reviewerWorkload: true,
+          },
+        },
+      );
+    }
+    case "add-invoice-comment": {
+      const addCommentMethod = service.addComment || service.addApprovalComment;
+
+      if (typeof addCommentMethod !== "function") {
+        throw new Error("Add comment is not configured in the current service.");
+      }
+
+      await addCommentMethod.call(service, pendingAction.payload.approvalRecordId, {
+        reviewer: pendingAction.payload.reviewer,
+        comment: pendingAction.payload.comment,
+        type: pendingAction.payload.commentType,
+        commentType: pendingAction.payload.commentType,
+      });
+
+      return createAssistantMessage(
+        `Comment added to ${pendingAction.payload.invoiceNumber}.`,
+        {
+          type: "action-result",
+          tone: "success",
+          approvalRecordId: pendingAction.payload.approvalRecordId,
+          refreshScope: {
+            inbox: true,
+            dashboardSummary: false,
+            detail: true,
+            reviewerWorkload: false,
+          },
+        },
+      );
+    }
+    case "assign-reviewer": {
+      await service.assignInvoiceReviewer(pendingAction.payload.approvalRecordId, {
+        reviewerName: pendingAction.payload.reviewerName,
+        reviewerEmail: pendingAction.payload.reviewerEmail,
+        assignmentNote: "Assigned through AI Operations Assistant confirmation flow.",
+      });
+
+      return createAssistantMessage(
+        `${pendingAction.payload.invoiceNumber} was assigned to ${pendingAction.payload.reviewerEmail}.`,
+        {
+          type: "action-result",
+          tone: "success",
+          approvalRecordId: pendingAction.payload.approvalRecordId,
+          refreshScope: {
+            inbox: true,
+            dashboardSummary: true,
+            detail: true,
+            reviewerWorkload: true,
+          },
+        },
+      );
+    }
+    default:
+      return createAssistantMessage("That assistant action is not supported yet.", {
+        type: "warning",
+        tone: "warning",
+      });
+  }
+}
+
 export async function explainBlockedInvoice(service, invoiceNumber) {
   const matchedInvoice = await findInvoiceByNumber(service, invoiceNumber);
 
@@ -377,6 +653,14 @@ export async function handleAssistantMessage(service, message) {
   const parsedIntent = parseAssistantIntent(message);
 
   switch (parsedIntent.intent) {
+    case "confirm pending action":
+      return createAssistantMessage("Reply yes only when you want to execute the pending action.", {
+        type: "help",
+      });
+    case "cancel pending action":
+      return createAssistantMessage("The pending action was not executed.", {
+        type: "help",
+      });
     case "daily briefing":
       return getDailyBriefing(service);
     case "dashboard summary":
@@ -443,6 +727,46 @@ export async function handleAssistantMessage(service, message) {
     }
     case "escalation briefing":
       return getEscalationBriefing(service);
+    case "run escalation check": {
+      const prepared = prepareRunEscalationCheck();
+      return createAssistantMessage(prepared.message, {
+        type: "pending-action",
+        tone: "warning",
+        pendingAction: prepared.pendingAction,
+      });
+    }
+    case "refresh invoice from books": {
+      const prepared = await prepareRefreshInvoiceFromBooks(service, parsedIntent.invoiceNumber);
+      return createAssistantMessage(prepared.message, {
+        type: prepared.ok ? "pending-action" : "warning",
+        tone: prepared.ok ? "warning" : "warning",
+        ...(prepared.pendingAction ? { pendingAction: prepared.pendingAction } : {}),
+      });
+    }
+    case "add comment to invoice": {
+      const prepared = await prepareAddInvoiceComment(
+        service,
+        parsedIntent.invoiceNumber,
+        parsedIntent.comment,
+      );
+      return createAssistantMessage(prepared.message, {
+        type: prepared.ok ? "pending-action" : "warning",
+        tone: prepared.ok ? "warning" : "warning",
+        ...(prepared.pendingAction ? { pendingAction: prepared.pendingAction } : {}),
+      });
+    }
+    case "assign reviewer": {
+      const prepared = await prepareAssignReviewer(
+        service,
+        parsedIntent.invoiceNumber,
+        parsedIntent.reviewerEmail,
+      );
+      return createAssistantMessage(prepared.message, {
+        type: prepared.ok ? "pending-action" : "warning",
+        tone: prepared.ok ? "warning" : "warning",
+        ...(prepared.pendingAction ? { pendingAction: prepared.pendingAction } : {}),
+      });
+    }
     case "why blocked":
       return explainBlockedInvoice(service, parsedIntent.invoiceNumber);
     case "can approve":
@@ -458,7 +782,7 @@ export async function handleAssistantMessage(service, message) {
       );
     default:
       return createAssistantMessage(
-        "Try a quick action or ask one of these: daily briefing, failed refreshes, reviewer workload, escalation briefing, why blocked INV-2026-0018, can approve INV-2026-0018, or invoice summary INV-2026-0018.",
+        "Try a quick action or ask one of these: daily briefing, failed refreshes, reviewer workload, escalation briefing, why blocked INV-2026-0018, can approve INV-2026-0018, invoice summary INV-2026-0018, refresh INV-2026-0018 from Books, run escalation check, add comment INV-2026-0018 Need manager review, or assign INV-2026-0018 to finance@example.com.",
         {
           type: "help",
         },

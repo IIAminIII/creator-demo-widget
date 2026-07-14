@@ -5,7 +5,11 @@ import InvoiceInbox from "./components/InvoiceInbox";
 import LoadingSpinner from "./components/LoadingSpinner";
 import OperationsAssistantCard from "./components/OperationsAssistantCard";
 import { useCreator } from "./contexts/DataContext";
-import { handleAssistantMessage } from "./services/approvalAssistantTools";
+import {
+  executePendingAssistantAction,
+  handleAssistantMessage,
+} from "./services/approvalAssistantTools";
+import { parseAssistantIntent } from "./services/chatbotAssistant";
 import {
   createInvoiceApprovalService,
   resolveInvoiceApprovalConfig,
@@ -196,6 +200,47 @@ function createAssistantIntroMessage() {
   };
 }
 
+function createAssistantQuickActions(detail = null) {
+  const selectedInvoiceNumber =
+    detail?.invoiceNumber || detail?.invoice?.invoiceNumber || "";
+  const hasSelectedInvoice = Boolean(selectedInvoiceNumber);
+
+  return [
+    { label: "Daily Briefing", prompt: "Daily Briefing", disabled: false },
+    { label: "Failed Refreshes", prompt: "Failed Refreshes", disabled: false },
+    { label: "Review Needed", prompt: "Review Needed", disabled: false },
+    { label: "Reviewer Workload", prompt: "Reviewer Workload", disabled: false },
+    { label: "Unassigned", prompt: "Unassigned", disabled: false },
+    { label: "Escalations", prompt: "Escalations", disabled: false },
+    {
+      label: "Run Escalation Check",
+      prompt: "run escalation check",
+      disabled: false,
+    },
+    {
+      label: "Refresh Selected From Books",
+      prompt: hasSelectedInvoice
+        ? `refresh ${selectedInvoiceNumber} from Books`
+        : "refresh selected from books",
+      disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Explain Selected Blockers",
+      prompt: hasSelectedInvoice
+        ? `why blocked ${selectedInvoiceNumber}`
+        : "explain selected blockers",
+      disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Can Selected Be Approved?",
+      prompt: hasSelectedInvoice
+        ? `can approve ${selectedInvoiceNumber}`
+        : "can selected be approved",
+      disabled: !hasSelectedInvoice,
+    },
+  ];
+}
+
 export default function App() {
   const {
     api,
@@ -240,6 +285,7 @@ export default function App() {
     createAssistantIntroMessage(),
   ]);
   const [assistantLoading, setAssistantLoading] = useState(false);
+  const [pendingAssistantAction, setPendingAssistantAction] = useState(null);
 
   function dismissToast(toastId) {
     setToasts((current) => current.filter((toast) => toast.id !== toastId));
@@ -459,6 +505,7 @@ export default function App() {
 
   useEffect(() => {
     setAssistantMessages([createAssistantIntroMessage()]);
+    setPendingAssistantAction(null);
   }, [service.mode]);
 
   useEffect(() => {
@@ -663,6 +710,35 @@ export default function App() {
     }
   }
 
+  async function refreshAfterAssistantAction(response, fallbackApprovalRecordId = "") {
+    const refreshScope = response?.data?.refreshScope || {};
+    const nextApprovalRecordId =
+      response?.data?.approvalRecordId || fallbackApprovalRecordId || selectedRecordId;
+
+    if (nextApprovalRecordId) {
+      setSelectedRecordId(nextApprovalRecordId);
+    }
+
+    if (refreshScope.inbox) {
+      await loadInbox(filters, {
+        silent: true,
+        preserveSelectedRecordId: nextApprovalRecordId,
+      });
+    }
+
+    if (refreshScope.dashboardSummary) {
+      await loadDashboardSummary({ silent: true });
+    }
+
+    if (refreshScope.reviewerWorkload) {
+      await loadReviewerWorkload({ silent: true });
+    }
+
+    if (refreshScope.detail && nextApprovalRecordId) {
+      await loadDetail(nextApprovalRecordId, { silent: true });
+    }
+  }
+
   async function handleAssistantPrompt(prompt) {
     const trimmedPrompt = String(prompt || "").trim();
 
@@ -681,17 +757,78 @@ export default function App() {
     setAssistantLoading(true);
 
     try {
+      const parsedIntent = parseAssistantIntent(trimmedPrompt);
+
+      if (pendingAssistantAction) {
+        if (parsedIntent.intent === "confirm pending action") {
+          const activePendingAction = pendingAssistantAction;
+          const response = await executePendingAssistantAction(service, activePendingAction);
+          setPendingAssistantAction(null);
+          await refreshAfterAssistantAction(
+            response,
+            activePendingAction.payload?.approvalRecordId,
+          );
+
+          setAssistantMessages((current) => [
+            ...current,
+            {
+              id: `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              ...response,
+            },
+          ]);
+          return;
+        }
+
+        if (parsedIntent.intent === "cancel pending action") {
+          setPendingAssistantAction(null);
+          setAssistantMessages((current) => [
+            ...current,
+            {
+              id: `assistant-cancel-${Date.now()}`,
+              role: "assistant",
+              content: "Pending action cancelled.",
+              data: {
+                type: "help",
+              },
+            },
+          ]);
+          return;
+        }
+
+        setAssistantMessages((current) => [
+          ...current,
+          {
+            id: `assistant-pending-${Date.now()}`,
+            role: "assistant",
+            content: "Reply yes to continue or no to cancel the pending action.",
+            data: {
+              type: "warning",
+              tone: "warning",
+            },
+          },
+        ]);
+        return;
+      }
+
       const response = await handleAssistantMessage(service, trimmedPrompt);
       const approvalRecordId = response?.data?.approvalRecordId;
       const nextGuardrailCheck = response?.data?.guardrailCheck;
+      const nextPendingAction = response?.data?.pendingAction || null;
+      const pendingApprovalRecordId = nextPendingAction?.payload?.approvalRecordId || "";
 
       if (approvalRecordId) {
         setSelectedRecordId(approvalRecordId);
       }
 
+      if (!approvalRecordId && pendingApprovalRecordId) {
+        setSelectedRecordId(pendingApprovalRecordId);
+      }
+
       if (nextGuardrailCheck) {
         setGuardrailCheck(nextGuardrailCheck);
       }
+
+      setPendingAssistantAction(nextPendingAction);
 
       setAssistantMessages((current) => [
         ...current,
@@ -741,6 +878,10 @@ export default function App() {
     selectedDetail?.currencyCode ||
     selectedDetail?.invoice?.currencyCode ||
     "USD";
+  const assistantQuickActions = useMemo(
+    () => createAssistantQuickActions(selectedDetail),
+    [selectedDetail],
+  );
   const dashboardCards = [
     {
       label: "Pending Approvals",
@@ -1091,6 +1232,8 @@ export default function App() {
       <OperationsAssistantCard
         messages={assistantMessages}
         loading={assistantLoading}
+        quickActions={assistantQuickActions}
+        pendingAction={pendingAssistantAction}
         onSend={handleAssistantPrompt}
       />
 

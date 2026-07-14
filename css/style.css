@@ -672,6 +672,17 @@ button {
   background: var(--surface-muted);
 }
 
+.assistant-pending-banner {
+  padding: 10px 12px;
+  border: 1px solid rgba(197, 133, 18, 0.24);
+  border-radius: 14px;
+  background: var(--warning-soft);
+  color: #8a5a08;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .assistant-chat-log {
   display: grid;
   gap: 10px;
@@ -743,6 +754,12 @@ button {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.assistant-suggestion-button:disabled,
+.assistant-quick-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .assistant-chat-user .assistant-suggestion-button {

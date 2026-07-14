@@ -5,6 +5,10 @@ export const ASSISTANT_QUICK_ACTIONS = [
   "Reviewer Workload",
   "Unassigned",
   "Escalations",
+  "Run Escalation Check",
+  "Refresh Selected From Books",
+  "Explain Selected Blockers",
+  "Can Selected Be Approved?",
 ];
 
 function normalizeText(value) {
@@ -20,12 +24,99 @@ function extractInvoiceNumber(message) {
   return match ? match[0].toUpperCase() : "";
 }
 
+function extractReviewerEmail(message) {
+  const match = String(message || "").match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i);
+  return match ? match[0].toLowerCase() : "";
+}
+
+function extractCommentAfterInvoice(message, invoiceNumber) {
+  const normalizedInvoiceNumber = String(invoiceNumber || "").trim();
+
+  if (!normalizedInvoiceNumber) {
+    return "";
+  }
+
+  const expression = new RegExp(
+    `add\\s+comment\\s+${normalizedInvoiceNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(.+)`,
+    "i",
+  );
+  const match = String(message || "").match(expression);
+  return match?.[1]?.trim() || "";
+}
+
 export function parseAssistantIntent(message) {
   const normalizedMessage = normalizeText(message);
   const invoiceNumber = extractInvoiceNumber(message);
+  const reviewerEmail = extractReviewerEmail(message);
 
   if (!normalizedMessage) {
     return { intent: "unknown", invoiceNumber: "" };
+  }
+
+  if (["yes", "confirm", "continue", "proceed", "ok"].includes(normalizedMessage)) {
+    return { intent: "confirm pending action", invoiceNumber: "" };
+  }
+
+  if (["no", "cancel", "stop"].includes(normalizedMessage)) {
+    return { intent: "cancel pending action", invoiceNumber: "" };
+  }
+
+  if (
+    includesAny(normalizedMessage, [
+      "run escalation check",
+      "check escalations now",
+      "run escalations",
+    ])
+  ) {
+    return { intent: "run escalation check", invoiceNumber: "" };
+  }
+
+  if (
+    includesAny(normalizedMessage, [
+      "refresh selected from books",
+      "refresh selected invoice from books",
+    ])
+  ) {
+    return {
+      intent: "refresh invoice from books",
+      invoiceNumber: "",
+      requestedIntent: "refresh invoice from books",
+    };
+  }
+
+  if (
+    includesAny(normalizedMessage, [
+      "refresh",
+      "refresh invoice",
+    ]) &&
+    normalizedMessage.includes("books")
+  ) {
+    return {
+      intent: invoiceNumber ? "refresh invoice from books" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "refresh invoice from books",
+    };
+  }
+
+  if (normalizedMessage.startsWith("add comment")) {
+    const comment = extractCommentAfterInvoice(message, invoiceNumber);
+    return {
+      intent:
+        invoiceNumber && comment ? "add comment to invoice" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "add comment to invoice",
+      comment,
+    };
+  }
+
+  if (normalizedMessage.startsWith("assign")) {
+    return {
+      intent:
+        invoiceNumber && reviewerEmail ? "assign reviewer" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "assign reviewer",
+      reviewerEmail,
+    };
   }
 
   if (
@@ -35,6 +126,7 @@ export function parseAssistantIntent(message) {
       "why is inv",
       "blocked inv",
       "blocker inv",
+      "explain selected blockers",
     ])
   ) {
     return {
@@ -50,6 +142,7 @@ export function parseAssistantIntent(message) {
       "approve inv",
       "safe to approve",
       "approval check",
+      "can selected be approved",
     ])
   ) {
     return {

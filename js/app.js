@@ -8,6 +8,7 @@ const state = {
   aiTools: null,
   aiAssistant: {
     busy: false,
+    pendingAction: null,
     messages: [
       {
         id: "assistant-intro-empty",
@@ -689,19 +690,46 @@ function createAssistantIntroMessage(detail = null) {
   };
 }
 
+function createAssistantQuickActions(detail = null) {
+  const selectedInvoiceNumber =
+    detail?.invoice?.invoiceNumber || detail?.invoiceNumber || "";
+  const hasSelectedInvoice = Boolean(selectedInvoiceNumber);
+
+  return [
+    { label: "Daily Briefing", prompt: "Daily Briefing", disabled: false },
+    { label: "Failed Refreshes", prompt: "Failed Refreshes", disabled: false },
+    { label: "Review Needed", prompt: "Review Needed", disabled: false },
+    { label: "Reviewer Workload", prompt: "Reviewer Workload", disabled: false },
+    { label: "Unassigned", prompt: "Unassigned", disabled: false },
+    { label: "Escalations", prompt: "Escalations", disabled: false },
+    { label: "Run Escalation Check", prompt: "run escalation check", disabled: false },
+    {
+      label: "Refresh Selected From Books",
+      prompt: hasSelectedInvoice
+        ? `refresh ${selectedInvoiceNumber} from Books`
+        : "refresh selected from books",
+      disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Explain Selected Blockers",
+      prompt: hasSelectedInvoice
+        ? `why blocked ${selectedInvoiceNumber}`
+        : "explain selected blockers",
+      disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Can Selected Be Approved?",
+      prompt: hasSelectedInvoice
+        ? `can approve ${selectedInvoiceNumber}`
+        : "can selected be approved",
+      disabled: !hasSelectedInvoice,
+    },
+  ];
+}
+
 function renderAiAssistantPanel() {
-  const { messages = [], busy, prompt = "" } = state.aiAssistant;
-  const suggestedPrompts = state.selectedDetail
-    ? [
-        "Why is this invoice blocked?",
-        "Show me the line items.",
-        "Summarize approval risks.",
-      ]
-    : [
-        "Give me a daily briefing.",
-        "Show escalation risks.",
-        "Show reviewer workload.",
-      ];
+  const { messages = [], busy, prompt = "", pendingAction = null } = state.aiAssistant;
+  const quickActions = createAssistantQuickActions(state.selectedDetail);
 
   return `
     <article class="detail-card action-card">
@@ -711,6 +739,13 @@ function renderAiAssistantPanel() {
         Ask questions in plain language and get replies generated from live Creator approval data, Books snapshots, and reviewer workload records.
       </p>
       <div class="assistant-chat-shell">
+        ${
+          pendingAction
+            ? `<div class="assistant-pending-banner">Pending action: ${escapeHtml(
+                pendingAction.label,
+              )}. Reply yes to continue or no to cancel.</div>`
+            : ""
+        }
         <div class="assistant-chat-log">
           ${messages
             .map(
@@ -756,13 +791,13 @@ function renderAiAssistantPanel() {
           }
         </div>
         <div class="assistant-chat-quick">
-          ${suggestedPrompts
+          ${quickActions
             .map(
-              (suggestion) => `
+              (action) => `
                 <button type="button" class="assistant-quick-button" data-assistant-suggestion="${escapeHtml(
-                  suggestion,
-                )}">
-                  ${escapeHtml(suggestion)}
+                  action.prompt,
+                )}" ${action.disabled ? "disabled" : ""}>
+                  ${escapeHtml(action.label)}
                 </button>
               `,
             )
@@ -1729,8 +1764,40 @@ function wireDetailActions() {
     }
   };
 
+  const refreshAfterAssistantAction = async (response, fallbackApprovalRecordId = "") => {
+    const refreshScope = response?.refreshScope || {};
+    const targetApprovalRecordId =
+      response?.approvalRecordId || fallbackApprovalRecordId || state.selectedRecordId;
+
+    if (targetApprovalRecordId) {
+      state.selectedRecordId = targetApprovalRecordId;
+    }
+
+    if (refreshScope.inbox) {
+      await loadInbox({
+        preserveSelectedRecordId: targetApprovalRecordId,
+        silent: true,
+      });
+    }
+
+    if (refreshScope.dashboardSummary) {
+      await loadDashboardSummary({ silent: true });
+    }
+
+    if (refreshScope.reviewerWorkload) {
+      await loadReviewerWorkload({ silent: true });
+    }
+
+    if (refreshScope.detail && targetApprovalRecordId) {
+      await loadDetailWithOptions(targetApprovalRecordId, { silent: true });
+      syncInboxItemFromDetail(state.selectedDetail);
+      renderInbox();
+    }
+  };
+
   const sendAssistantPrompt = async (promptOverride = "") => {
     const prompt = normalizeText(promptOverride || assistantPromptInput?.value || state.aiAssistant.prompt);
+    const normalizedPrompt = prompt.toLowerCase();
 
     if (!prompt) {
       return;
@@ -1745,6 +1812,53 @@ function wireDetailActions() {
     renderDetail();
 
     await runAssistantTask(async () => {
+      if (state.aiAssistant.pendingAction) {
+        if (["yes", "confirm", "continue", "proceed", "ok"].includes(normalizedPrompt)) {
+          const activePendingAction = state.aiAssistant.pendingAction;
+          const response = await state.aiTools.executePendingAssistantAction(
+            activePendingAction,
+          );
+          state.aiAssistant.pendingAction = null;
+          await refreshAfterAssistantAction(
+            response,
+            activePendingAction.payload?.approvalRecordId,
+          );
+          state.aiAssistant.messages.push({
+            id: `assistant-reply-${Date.now()}`,
+            role: "assistant",
+            title: response.title || "Approval Copilot",
+            summary: response.summary || response.message,
+            bullets: response.bullets || [],
+            tone: response.ok ? "neutral" : "warning",
+          });
+          renderDetail();
+          return;
+        }
+
+        if (["no", "cancel", "stop"].includes(normalizedPrompt)) {
+          state.aiAssistant.pendingAction = null;
+          state.aiAssistant.messages.push({
+            id: `assistant-reply-${Date.now()}`,
+            role: "assistant",
+            title: "Approval Copilot",
+            summary: "Pending action cancelled.",
+            tone: "warning",
+          });
+          renderDetail();
+          return;
+        }
+
+        state.aiAssistant.messages.push({
+          id: `assistant-reply-${Date.now()}`,
+          role: "assistant",
+          title: "Approval Copilot",
+          summary: "Reply yes to continue or no to cancel the pending action.",
+          tone: "warning",
+        });
+        renderDetail();
+        return;
+      }
+
       const response = await state.aiTools.answerReviewerQuery({
         prompt,
         approvalRecordId: state.selectedRecordId,
@@ -1753,6 +1867,13 @@ function wireDetailActions() {
 
       if (response.guardrailCheck) {
         state.guardrailCheck = response.guardrailCheck;
+      }
+
+      state.aiAssistant.pendingAction = response.pendingAction || null;
+
+      if (state.aiAssistant.pendingAction?.payload?.approvalRecordId) {
+        state.selectedRecordId = state.aiAssistant.pendingAction.payload.approvalRecordId;
+        state.selectedDetail = await state.service.loadInvoiceDetail(state.selectedRecordId);
       }
 
       state.aiAssistant.messages.push({

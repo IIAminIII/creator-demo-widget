@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { ASSISTANT_QUICK_ACTIONS } from "../services/chatbotAssistant";
 
 function formatCurrency(value, currencyCode) {
   return new Intl.NumberFormat("en-US", {
@@ -351,6 +350,8 @@ function renderMessageData(data) {
 export default function OperationsAssistantCard({
   messages = [],
   loading = false,
+  quickActions = [],
+  pendingAction = null,
   onSend,
 }) {
   const [draft, setDraft] = useState("");
@@ -377,16 +378,22 @@ export default function OperationsAssistantCard({
         </div>
       </div>
 
+      {pendingAction ? (
+        <div className="assistant-pending-banner">
+          Pending action: {pendingAction.label}. Reply yes to continue or no to cancel.
+        </div>
+      ) : null}
+
       <div className="assistant-quick-actions">
-        {ASSISTANT_QUICK_ACTIONS.map((action) => (
+        {quickActions.map((action) => (
           <button
-            key={action}
+            key={action.label}
             type="button"
             className="assistant-quick-action"
-            onClick={() => submitMessage(action)}
-            disabled={loading}
+            onClick={() => submitMessage(action.prompt)}
+            disabled={loading || action.disabled}
           >
-            {action}
+            {action.label}
           </button>
         ))}
       </div>
