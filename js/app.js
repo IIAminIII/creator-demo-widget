@@ -739,19 +739,7 @@ function renderAiAssistantPanel() {
                   }
                   ${
                     Array.isArray(message.suggestions) && message.suggestions.length
-                      ? `<div class="assistant-chat-suggestions">
-                          ${message.suggestions
-                            .map(
-                              (suggestion) => `
-                                <button type="button" class="assistant-suggestion-button" data-assistant-suggestion="${escapeHtml(
-                                  suggestion,
-                                )}">
-                                  ${escapeHtml(suggestion)}
-                                </button>
-                              `,
-                            )
-                            .join("")}
-                        </div>`
+                      ? ""
                       : ""
                   }
                 </div>

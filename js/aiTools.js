@@ -564,6 +564,12 @@ export function createInvoiceApprovalAiTools(service) {
 
   async function answerReviewerQuery({ prompt, approvalRecordId, filters = {} }) {
     const normalizedPrompt = normalizeText(prompt).toLowerCase();
+    const asksForApprovalRiskSummary =
+      normalizedPrompt.includes("approval risk") ||
+      normalizedPrompt.includes("approval risks") ||
+      normalizedPrompt.includes("risk summary") ||
+      normalizedPrompt.includes("summarize approval risk") ||
+      normalizedPrompt.includes("summarise approval risk");
     const asksForSelectedInvoiceSummary =
       normalizedPrompt.includes("this invoice") ||
       normalizedPrompt.includes("selected invoice") ||
@@ -572,6 +578,7 @@ export function createInvoiceApprovalAiTools(service) {
       normalizedPrompt.includes("summarise this invoice") ||
       normalizedPrompt.includes("invoice detail");
     const needsSelectedInvoice =
+      asksForApprovalRiskSummary ||
       asksForSelectedInvoiceSummary ||
       normalizedPrompt.includes("approve") ||
       normalizedPrompt.includes("block") ||
@@ -671,6 +678,7 @@ export function createInvoiceApprovalAiTools(service) {
     }
 
     if (
+      asksForApprovalRiskSummary ||
       normalizedPrompt.includes("block") ||
       normalizedPrompt.includes("why can't") ||
       normalizedPrompt.includes("why cant") ||
