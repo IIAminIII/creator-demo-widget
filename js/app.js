@@ -12,14 +12,8 @@ const state = {
       {
         id: "assistant-intro-empty",
         role: "assistant",
-        title: "Approval Copilot",
         summary:
-          "Ask for a daily briefing, escalation risks, reviewer workload, or select an invoice and ask why it is blocked.",
-        suggestions: [
-          "Give me a daily briefing.",
-          "Show escalation risks.",
-          "Show reviewer workload.",
-        ],
+          "Use the quick actions below or ask about approvals, blockers, workload, refresh issues, and escalations.",
       },
     ],
     prompt: "",
@@ -683,27 +677,15 @@ function createAssistantIntroMessage(detail = null) {
     return {
       id: `assistant-intro-${approvalRecordId}`,
       role: "assistant",
-      title: "Approval Copilot",
       summary: `Ask about ${invoiceNumber}. I answer from the current Creator workflow data, Books snapshot, and reviewer workload records.`,
-      suggestions: [
-        "Why is this invoice blocked?",
-        "Show me the line items.",
-        "Summarize approval risks.",
-      ],
     };
   }
 
   return {
     id: "assistant-intro-empty",
     role: "assistant",
-    title: "Approval Copilot",
     summary:
-      "Ask for a daily briefing, escalation risks, reviewer workload, or select an invoice and ask why it is blocked.",
-    suggestions: [
-      "Give me a daily briefing.",
-      "Show escalation risks.",
-      "Show reviewer workload.",
-    ],
+      "Use the quick actions below or ask about approvals, blockers, workload, refresh issues, and escalations.",
   };
 }
 
