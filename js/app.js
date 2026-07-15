@@ -648,29 +648,6 @@ function renderRetryButton(buttonId, label) {
   )}</button>`;
 }
 
-function renderAssistantInvoiceList(items = [], emptyMessage) {
-  if (!items.length) {
-    return `<div class="section-hint">${escapeHtml(emptyMessage)}</div>`;
-  }
-
-  return `
-    <div class="assistant-list">
-      ${items
-        .slice(0, 5)
-        .map(
-          (item) => `
-            <div class="assistant-list-item">
-              <strong>${escapeHtml(item.invoiceNumber || item.approvalRecordId)}</strong>
-              <span>${escapeHtml(item.customerName || "Unknown customer")}</span>
-              <span>${escapeHtml(item.syncStatus || item.approvalStatus || "Needs review")}</span>
-            </div>
-          `,
-        )
-        .join("")}
-    </div>
-  `;
-}
-
 function createAssistantIntroMessage(detail = null) {
   if (detail?.invoice?.invoiceNumber || detail?.invoiceNumber) {
     const invoiceNumber = detail?.invoice?.invoiceNumber || detail?.invoiceNumber;
@@ -678,7 +655,7 @@ function createAssistantIntroMessage(detail = null) {
     return {
       id: `assistant-intro-${approvalRecordId}`,
       role: "assistant",
-      summary: `Ask about ${invoiceNumber}. I answer from the current Creator workflow data, Books snapshot, and reviewer workload records.`,
+      summary: `Ask about ${invoiceNumber}. I answer from the current Creator workflow data and can safely stage approve, reject, or clarification actions with confirmation.`,
     };
   }
 
@@ -686,7 +663,7 @@ function createAssistantIntroMessage(detail = null) {
     id: "assistant-intro-empty",
     role: "assistant",
     summary:
-      "Use the quick actions below or ask about approvals, blockers, workload, refresh issues, and escalations.",
+      "Use the quick actions below or ask about approvals, blockers, workload, refresh issues, escalations, and guarded approve or reject actions.",
   };
 }
 
@@ -708,6 +685,25 @@ function createAssistantQuickActions(detail = null) {
       prompt: hasSelectedInvoice
         ? `refresh ${selectedInvoiceNumber} from Books`
         : "refresh selected from books",
+      disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Approve Selected",
+      prompt: hasSelectedInvoice ? `approve ${selectedInvoiceNumber}` : "approve selected",
+      disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Reject Selected",
+      prompt: hasSelectedInvoice
+        ? `reject ${selectedInvoiceNumber} because `
+        : "reject selected because ",
+      disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Request Clarification",
+      prompt: hasSelectedInvoice
+        ? `request clarification ${selectedInvoiceNumber} `
+        : "request clarification selected ",
       disabled: !hasSelectedInvoice,
     },
     {
@@ -736,7 +732,7 @@ function renderAiAssistantPanel() {
       <div class="section-tag tag-creator">AI Operations Assistant</div>
       <h3>Approval Copilot</h3>
       <p>
-        Ask questions in plain language and get replies generated from live Creator approval data, Books snapshots, and reviewer workload records.
+        Ask questions in plain language and stage guarded approve, reject, or clarification actions through Creator confirmation flow.
       </p>
       <div class="assistant-chat-shell">
         ${
@@ -804,7 +800,7 @@ function renderAiAssistantPanel() {
             .join("")}
         </div>
         <div class="assistant-chat-compose">
-          <textarea id="assistant-prompt-input" placeholder="Ask things like: why is this invoice blocked, show the line items, give me a daily briefing...">${escapeHtml(
+          <textarea id="assistant-prompt-input" placeholder="Try: approve INV-2026-0018 or reject INV-2026-0018 because wrong amount">${escapeHtml(
             prompt,
           )}</textarea>
           <button type="button" class="secondary-button" id="assistant-send-button" ${busy ? "disabled" : ""}>

@@ -6,6 +6,10 @@ function normalizeCompareText(value) {
   return normalizeText(value).replace(/[^a-z0-9]/gi, "").toUpperCase();
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function firstText(...values) {
   for (const value of values) {
     const normalized = normalizeText(value);
@@ -137,6 +141,67 @@ function extractCommentAfterInvoice(message, invoiceNumber) {
   return match?.[1]?.trim() || "";
 }
 
+function extractActionReason(text, removableWords = []) {
+  let remaining = String(text || "");
+
+  removableWords
+    .filter(Boolean)
+    .sort((left, right) => String(right).length - String(left).length)
+    .forEach((word) => {
+      remaining = remaining.replace(new RegExp(escapeRegExp(word), "gi"), " ");
+    });
+
+  return remaining.replace(/^[\s,:;-]+/, "").replace(/\s+/g, " ").trim();
+}
+
+function parseAssistantIntent(message) {
+  const normalizedMessage = normalizeText(message).toLowerCase();
+  const invoiceNumber = extractInvoiceNumber(message);
+
+  if (!normalizedMessage) {
+    return { intent: "unknown", invoiceNumber: "" };
+  }
+
+  if (normalizedMessage.startsWith("approve")) {
+    return {
+      intent: invoiceNumber ? "approve_invoice" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "approve",
+      comment: extractActionReason(message, ["approve", invoiceNumber]),
+    };
+  }
+
+  if (normalizedMessage.startsWith("reject")) {
+    return {
+      intent: invoiceNumber ? "reject_invoice" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "reject",
+      reason: extractActionReason(message, ["reject", "because", invoiceNumber]),
+    };
+  }
+
+  if (
+    normalizedMessage.startsWith("request clarification") ||
+    normalizedMessage.startsWith("clarification request") ||
+    normalizedMessage.startsWith("clarify")
+  ) {
+    return {
+      intent: invoiceNumber ? "request_clarification" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "request clarification",
+      reason: extractActionReason(message, [
+        "request clarification",
+        "clarification request",
+        "clarify",
+        "because",
+        invoiceNumber,
+      ]),
+    };
+  }
+
+  return { intent: "unknown", invoiceNumber };
+}
+
 function deriveReviewerNameFromEmail(email) {
   const localPart = String(email || "")
     .split("@")[0]
@@ -152,6 +217,14 @@ function deriveReviewerNameFromEmail(email) {
     .filter(Boolean)
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ");
+}
+
+function getAssistantReviewerName(service) {
+  return firstText(
+    service?.currentReviewerName,
+    service?.config?.currentReviewerName,
+    "AI Operations Assistant",
+  );
 }
 
 function summarizeLineItems(detail = {}) {
@@ -767,6 +840,151 @@ export function createInvoiceApprovalAiTools(service) {
     };
   }
 
+  async function prepareApproveInvoice(invoiceNumber, comment = "") {
+    const matchedInvoice = await findInvoiceByNumber(invoiceNumber);
+    const normalizedComment = normalizeText(comment);
+
+    if (!matchedInvoice) {
+      return {
+        ok: false,
+        requiresConfirmation: false,
+        message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+        pendingAction: null,
+        blockingReasons: [],
+        warningReasons: [],
+      };
+    }
+
+    const validation = await service.validateInvoiceApproval(matchedInvoice.approvalRecordId);
+    const blockingReasons = toArray(validation?.blockingReasons).filter(Boolean);
+    const warningReasons = toArray(validation?.warningReasons).filter(Boolean);
+    const invoiceNumberLabel = matchedInvoice.detail.invoiceNumber;
+
+    if (validation?.canApprove === false) {
+      return {
+        ok: false,
+        requiresConfirmation: false,
+        message: firstText(
+          validation?.message,
+          `${invoiceNumberLabel} is blocked and cannot be prepared for approval.`,
+        ),
+        pendingAction: null,
+        blockingReasons,
+        warningReasons,
+        invoice: matchedInvoice.detail,
+        guardrailCheck: validation,
+      };
+    }
+
+    return {
+      ok: true,
+      requiresConfirmation: true,
+      message: warningReasons.length
+        ? `Ready to approve ${invoiceNumberLabel}. Warning reasons still need reviewer confirmation. Reply yes to continue or no to cancel.`
+        : `Ready to approve ${invoiceNumberLabel}${normalizedComment ? ` with note "${normalizedComment}"` : ""}. Reply yes to continue or no to cancel.`,
+      pendingAction: {
+        type: "approve_invoice",
+        label: `Approve ${invoiceNumberLabel}`,
+        payload: {
+          approvalRecordId: matchedInvoice.approvalRecordId,
+          invoiceNumber: invoiceNumberLabel,
+          comment: normalizedComment,
+          reviewer: getAssistantReviewerName(service),
+        },
+      },
+      blockingReasons,
+      warningReasons,
+      invoice: matchedInvoice.detail,
+      guardrailCheck: validation,
+    };
+  }
+
+  async function prepareRejectInvoice(invoiceNumber, reason = "") {
+    const matchedInvoice = await findInvoiceByNumber(invoiceNumber);
+    const normalizedReason = normalizeText(reason);
+
+    if (!matchedInvoice) {
+      return {
+        ok: false,
+        requiresConfirmation: false,
+        message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+        pendingAction: null,
+      };
+    }
+
+    if (!normalizedReason) {
+      return {
+        ok: false,
+        requiresConfirmation: false,
+        message: `Rejecting ${matchedInvoice.detail.invoiceNumber} requires a reason. Try: reject ${matchedInvoice.detail.invoiceNumber} because wrong amount.`,
+        pendingAction: null,
+        invoice: matchedInvoice.detail,
+      };
+    }
+
+    return {
+      ok: true,
+      requiresConfirmation: true,
+      message: `Ready to reject ${matchedInvoice.detail.invoiceNumber} with reason "${normalizedReason}". Reply yes to continue or no to cancel.`,
+      pendingAction: {
+        type: "reject_invoice",
+        label: `Reject ${matchedInvoice.detail.invoiceNumber}`,
+        payload: {
+          approvalRecordId: matchedInvoice.approvalRecordId,
+          invoiceNumber: matchedInvoice.detail.invoiceNumber,
+          reason: normalizedReason,
+          comment: normalizedReason,
+          reviewer: getAssistantReviewerName(service),
+        },
+      },
+      invoice: matchedInvoice.detail,
+      reason: normalizedReason,
+    };
+  }
+
+  async function prepareRequestClarification(invoiceNumber, reason = "") {
+    const matchedInvoice = await findInvoiceByNumber(invoiceNumber);
+    const normalizedReason = normalizeText(reason);
+
+    if (!matchedInvoice) {
+      return {
+        ok: false,
+        requiresConfirmation: false,
+        message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+        pendingAction: null,
+      };
+    }
+
+    if (!normalizedReason) {
+      return {
+        ok: false,
+        requiresConfirmation: false,
+        message: `Requesting clarification for ${matchedInvoice.detail.invoiceNumber} requires a reason. Try: request clarification ${matchedInvoice.detail.invoiceNumber} missing PO number.`,
+        pendingAction: null,
+        invoice: matchedInvoice.detail,
+      };
+    }
+
+    return {
+      ok: true,
+      requiresConfirmation: true,
+      message: `Ready to request clarification for ${matchedInvoice.detail.invoiceNumber} with reason "${normalizedReason}". Reply yes to continue or no to cancel.`,
+      pendingAction: {
+        type: "request_clarification",
+        label: `Request clarification for ${matchedInvoice.detail.invoiceNumber}`,
+        payload: {
+          approvalRecordId: matchedInvoice.approvalRecordId,
+          invoiceNumber: matchedInvoice.detail.invoiceNumber,
+          reason: normalizedReason,
+          comment: normalizedReason,
+          reviewer: getAssistantReviewerName(service),
+        },
+      },
+      invoice: matchedInvoice.detail,
+      reason: normalizedReason,
+    };
+  }
+
   async function executePendingAssistantAction(pendingAction) {
     if (!pendingAction?.type) {
       return withResult(false, "There is no pending assistant action to run.", {
@@ -775,6 +993,56 @@ export function createInvoiceApprovalAiTools(service) {
     }
 
     switch (pendingAction.type) {
+      case "approve_invoice": {
+        const validation = await service.validateInvoiceApproval(
+          pendingAction.payload.approvalRecordId,
+        );
+        const blockingReasons = toArray(validation?.blockingReasons).filter(Boolean);
+        const warningReasons = toArray(validation?.warningReasons).filter(Boolean);
+
+        if (validation?.canApprove === false) {
+          return withResult(
+            false,
+            firstText(
+              validation?.message,
+              `${pendingAction.payload.invoiceNumber} is blocked and was not approved.`,
+            ),
+            {
+              title: "Approval blocked",
+              summary: firstText(
+                validation?.message,
+                `${pendingAction.payload.invoiceNumber} is blocked and was not approved.`,
+              ),
+              bullets: [
+                ...blockingReasons.map((reason) => `Blocking reason: ${reason}`),
+                ...warningReasons.map((reason) => `Warning reason: ${reason}`),
+              ],
+              guardrailCheck: validation,
+              tone: "warning",
+            },
+          );
+        }
+
+        await service.approveInvoice(pendingAction.payload.approvalRecordId, {
+          reviewer: pendingAction.payload.reviewer,
+          comment: pendingAction.payload.comment,
+        });
+
+        return withResult(
+          true,
+          `${pendingAction.payload.invoiceNumber} was approved through the Creator workflow.`,
+          {
+            approvalRecordId: pendingAction.payload.approvalRecordId,
+            bullets: warningReasons.map((reason) => `Warning acknowledged: ${reason}`),
+            refreshScope: {
+              inbox: true,
+              dashboardSummary: true,
+              detail: true,
+              reviewerWorkload: false,
+            },
+          },
+        );
+      }
       case "refresh-invoice-from-books": {
         const refreshMethod =
           service.refreshInvoiceFromBooks ||
@@ -878,6 +1146,48 @@ export function createInvoiceApprovalAiTools(service) {
           },
         });
       }
+      case "reject_invoice": {
+        await service.rejectInvoice(pendingAction.payload.approvalRecordId, {
+          reviewer: pendingAction.payload.reviewer,
+          comment: pendingAction.payload.comment,
+          exceptionReason: pendingAction.payload.reason,
+        });
+
+        return withResult(
+          true,
+          `${pendingAction.payload.invoiceNumber} was rejected through the Creator workflow.`,
+          {
+            approvalRecordId: pendingAction.payload.approvalRecordId,
+            refreshScope: {
+              inbox: true,
+              dashboardSummary: true,
+              detail: true,
+              reviewerWorkload: false,
+            },
+          },
+        );
+      }
+      case "request_clarification": {
+        await service.requestClarification(pendingAction.payload.approvalRecordId, {
+          reviewer: pendingAction.payload.reviewer,
+          comment: pendingAction.payload.comment,
+          exceptionReason: pendingAction.payload.reason,
+        });
+
+        return withResult(
+          true,
+          `${pendingAction.payload.invoiceNumber} was moved to clarification requested through the Creator workflow.`,
+          {
+            approvalRecordId: pendingAction.payload.approvalRecordId,
+            refreshScope: {
+              inbox: true,
+              dashboardSummary: true,
+              detail: true,
+              reviewerWorkload: false,
+            },
+          },
+        );
+      }
       default:
         return withResult(false, "That assistant action is not supported yet.", {
           tone: "warning",
@@ -885,8 +1195,9 @@ export function createInvoiceApprovalAiTools(service) {
     }
   }
 
-  async function answerReviewerQuery({ prompt, approvalRecordId, filters = {} }) {
+  async function answerReviewerQuery({ prompt, approvalRecordId }) {
     const normalizedPrompt = normalizeText(prompt).toLowerCase();
+    const parsedIntent = parseAssistantIntent(prompt);
     const invoiceNumber = extractInvoiceNumber(prompt);
     const reviewerEmail = extractReviewerEmail(prompt);
     const commentText = extractCommentAfterInvoice(prompt, invoiceNumber);
@@ -915,12 +1226,78 @@ export function createInvoiceApprovalAiTools(service) {
     const needsSelectedInvoice =
       asksForApprovalRiskSummary ||
       asksForSelectedInvoiceSummary ||
-      normalizedPrompt.includes("approve") ||
+      (normalizedPrompt.includes("approve") && parsedIntent.intent === "unknown") ||
       normalizedPrompt.includes("block") ||
       normalizedPrompt.includes("difference") ||
       normalizedPrompt.includes("line item") ||
       normalizedPrompt.includes("line-item") ||
       normalizedPrompt.includes("why");
+
+    if (parsedIntent.intent === "invoice reference required") {
+      return withResult(
+        false,
+        `Include the invoice number so I can run the ${parsedIntent.requestedIntent} request safely. Examples: approve INV-2026-0018, reject INV-2026-0018 because wrong amount, or request clarification INV-2026-0018 missing PO number.`,
+        {
+          title: "Invoice reference required",
+          summary: `Include the invoice number so I can run the ${parsedIntent.requestedIntent} request safely.`,
+          bullets: [
+            "approve INV-2026-0018",
+            "reject INV-2026-0018 because wrong amount",
+            "request clarification INV-2026-0018 missing PO number",
+          ],
+          tone: "warning",
+        },
+      );
+    }
+
+    if (parsedIntent.intent === "approve_invoice") {
+      const prepared = await prepareApproveInvoice(
+        parsedIntent.invoiceNumber,
+        parsedIntent.comment,
+      );
+      return withResult(prepared.ok, prepared.message, {
+        title: prepared.ok ? "Confirmation required" : "Approval blocked",
+        summary: prepared.message,
+        bullets: [
+          ...toArray(prepared.blockingReasons).map((reason) => `Blocking reason: ${reason}`),
+          ...toArray(prepared.warningReasons).map((reason) => `Warning reason: ${reason}`),
+        ],
+        pendingAction: prepared.pendingAction,
+        requiresConfirmation: prepared.requiresConfirmation,
+        guardrailCheck: prepared.guardrailCheck,
+        tone: "warning",
+      });
+    }
+
+    if (parsedIntent.intent === "reject_invoice") {
+      const prepared = await prepareRejectInvoice(
+        parsedIntent.invoiceNumber,
+        parsedIntent.reason,
+      );
+      return withResult(prepared.ok, prepared.message, {
+        title: prepared.ok ? "Confirmation required" : "Reject unavailable",
+        summary: prepared.message,
+        bullets: prepared.reason ? [`Reason: ${prepared.reason}`] : [],
+        pendingAction: prepared.pendingAction,
+        requiresConfirmation: prepared.requiresConfirmation,
+        tone: "warning",
+      });
+    }
+
+    if (parsedIntent.intent === "request_clarification") {
+      const prepared = await prepareRequestClarification(
+        parsedIntent.invoiceNumber,
+        parsedIntent.reason,
+      );
+      return withResult(prepared.ok, prepared.message, {
+        title: prepared.ok ? "Confirmation required" : "Clarification unavailable",
+        summary: prepared.message,
+        bullets: prepared.reason ? [`Reason: ${prepared.reason}`] : [],
+        pendingAction: prepared.pendingAction,
+        requiresConfirmation: prepared.requiresConfirmation,
+        tone: "warning",
+      });
+    }
 
     if (asksToRunEscalationCheck) {
       const prepared = prepareRunEscalationCheck();
@@ -1096,12 +1473,13 @@ export function createInvoiceApprovalAiTools(service) {
     return withResult(false, "I can answer only from live approval data. Try one of the supported questions below.", {
       title: "Supported assistant questions",
       summary:
-        "Ask for a daily briefing, escalation risks, reviewer workload, line items, selected invoice summary, why the selected invoice is blocked, refresh INV-2026-0018 from Books, run escalation check, add comment INV-2026-0018 Need manager review, or assign INV-2026-0018 to finance@example.com.",
+        "Ask for a daily briefing, escalation risks, reviewer workload, line items, selected invoice summary, why the selected invoice is blocked, approve INV-2026-0018, reject INV-2026-0018 because wrong amount, request clarification INV-2026-0018 missing PO number, refresh INV-2026-0018 from Books, run escalation check, add comment INV-2026-0018 Need manager review, or assign INV-2026-0018 to finance@example.com.",
       bullets: approvalRecordId
         ? [
             "Why is this invoice blocked?",
             "Show me the line items.",
             "Summarize this invoice.",
+            "Approve the selected invoice.",
           ]
         : [
             "Give me a daily briefing.",
@@ -1135,6 +1513,9 @@ export function createInvoiceApprovalAiTools(service) {
     prepareRunEscalationCheck,
     prepareAddInvoiceComment,
     prepareAssignReviewer,
+    prepareApproveInvoice,
+    prepareRejectInvoice,
+    prepareRequestClarification,
     executePendingAssistantAction,
     prepareReviewerAssignmentPreview,
     prepareEscalationBriefing,

@@ -22,6 +22,10 @@ function firstText(...values) {
   return "";
 }
 
+function toReasonList(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
 function toSentenceCaseFromEmail(email) {
   const localPart = String(email || "")
     .split("@")[0]
@@ -52,19 +56,21 @@ function toInboxItems(response) {
 }
 
 function normalizeInvoiceItem(item = {}) {
+  const source = item && typeof item === "object" ? item : {};
+
   return {
-    approvalRecordId: item.approvalRecordId || "",
-    booksInvoiceId: item.booksInvoiceId || "",
-    invoiceNumber: item.invoiceNumber || "",
-    customerName: item.customerName || "",
-    approvalStatus: item.approvalStatus || "Unknown",
-    syncStatus: item.syncStatus || "Unknown",
-    paymentStatus: item.paymentStatus || "Unknown",
-    assignedReviewer: item.assignedReviewer || "Unassigned",
-    dueDate: item.dueDate || "",
-    invoiceTotal: Number(item.invoiceTotal || 0),
-    currencyCode: item.currencyCode || "USD",
-    differenceFound: item.differenceFound === true,
+    approvalRecordId: source.approvalRecordId || "",
+    booksInvoiceId: source.booksInvoiceId || "",
+    invoiceNumber: source.invoiceNumber || "",
+    customerName: source.customerName || "",
+    approvalStatus: source.approvalStatus || "Unknown",
+    syncStatus: source.syncStatus || "Unknown",
+    paymentStatus: source.paymentStatus || "Unknown",
+    assignedReviewer: source.assignedReviewer || "Unassigned",
+    dueDate: source.dueDate || "",
+    invoiceTotal: Number(source.invoiceTotal || 0),
+    currencyCode: source.currencyCode || "USD",
+    differenceFound: source.differenceFound === true,
   };
 }
 
@@ -102,6 +108,76 @@ function buildInvoiceListData(title, items, emptyMessage) {
     totalCount: items.length,
     emptyMessage,
   };
+}
+
+function getAssistantReviewerName(service) {
+  return firstText(
+    service?.currentReviewerName,
+    service?.config?.currentReviewerName,
+    "AI Operations Assistant",
+  );
+}
+
+function buildApprovalCheckData(invoice, validation, tone = "neutral", extras = {}) {
+  return {
+    type: "approval-check",
+    approvalRecordId: invoice?.approvalRecordId || extras.approvalRecordId || "",
+    invoice: normalizeInvoiceItem(invoice),
+    canApprove: validation?.canApprove !== false,
+    blockingReasons: toReasonList(validation?.blockingReasons),
+    warningReasons: toReasonList(validation?.warningReasons),
+    syncStatus: firstText(validation?.syncStatus, invoice?.syncStatus, "Unknown"),
+    paymentStatus: firstText(
+      validation?.booksPaymentStatus,
+      invoice?.paymentStatus,
+      "Unknown",
+    ),
+    differenceFound:
+      validation?.differenceFound === true || invoice?.differenceFound === true,
+    lastBooksSyncAt: firstText(validation?.lastBooksSyncAt, invoice?.lastBooksSyncAt),
+    lastComparedAt: firstText(validation?.lastComparedAt, invoice?.lastComparedAt),
+    guardrailCheck: validation,
+    tone,
+    ...extras,
+  };
+}
+
+function buildApprovalPreviewMessage(prepared) {
+  if (!prepared.invoice) {
+    return createAssistantMessage(prepared.message, {
+      type: "warning",
+      tone: "warning",
+    });
+  }
+
+  return createAssistantMessage(prepared.message, {
+    ...buildApprovalCheckData(
+      prepared.invoice,
+      {
+        canApprove: prepared.canApprove,
+        blockingReasons: prepared.blockingReasons,
+        warningReasons: prepared.warningReasons,
+        syncStatus: prepared.syncStatus,
+        booksPaymentStatus: prepared.paymentStatus,
+        lastBooksSyncAt: prepared.lastBooksSyncAt,
+        lastComparedAt: prepared.lastComparedAt,
+      },
+      prepared.ok ? "warning" : "warning",
+      prepared.pendingAction ? { pendingAction: prepared.pendingAction } : {},
+    ),
+  });
+}
+
+function buildActionPreviewMessage(prepared, actionLabel) {
+  return createAssistantMessage(prepared.message, {
+    type: prepared.ok ? "approval-action-preview" : "warning",
+    tone: prepared.ok ? "warning" : "warning",
+    actionLabel,
+    invoiceNumber: prepared.invoice?.invoiceNumber || "",
+    reason: prepared.reason || "",
+    approvalRecordId: prepared.invoice?.approvalRecordId || "",
+    ...(prepared.pendingAction ? { pendingAction: prepared.pendingAction } : {}),
+  });
 }
 
 function buildApprovalCheckContent(invoiceNumber, validation) {
@@ -369,6 +445,170 @@ export async function prepareAssignReviewer(service, invoiceNumber, reviewerEmai
   };
 }
 
+export async function prepareApproveInvoice(service, invoiceNumber, comment = "") {
+  const matchedInvoice = await findInvoiceByNumber(service, invoiceNumber);
+  const normalizedComment = normalizeText(comment);
+
+  if (!matchedInvoice) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+      pendingAction: null,
+      blockingReasons: [],
+      warningReasons: [],
+      invoice: null,
+    };
+  }
+
+  const validation = await service.validateInvoiceApproval(matchedInvoice.approvalRecordId);
+  const blockingReasons = toReasonList(validation?.blockingReasons);
+  const warningReasons = toReasonList(validation?.warningReasons);
+  const invoice = normalizeInvoiceItem(matchedInvoice.detail);
+
+  if (validation?.canApprove === false) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: firstText(
+        validation?.message,
+        `${invoice.invoiceNumber} is blocked and cannot be prepared for approval.`,
+      ),
+      pendingAction: null,
+      blockingReasons,
+      warningReasons,
+      invoice,
+      canApprove: false,
+      syncStatus: firstText(validation?.syncStatus, invoice.syncStatus),
+      paymentStatus: firstText(validation?.booksPaymentStatus, invoice.paymentStatus),
+      lastBooksSyncAt: validation?.lastBooksSyncAt || "",
+      lastComparedAt: validation?.lastComparedAt || "",
+    };
+  }
+
+  return {
+    ok: true,
+    requiresConfirmation: true,
+    message: warningReasons.length
+      ? `Ready to approve ${invoice.invoiceNumber} with reviewer confirmation. ${warningReasons.length} warning reason(s) still need acknowledgment. Reply yes to continue or no to cancel.`
+      : `Ready to approve ${invoice.invoiceNumber}${normalizedComment ? ` with note "${normalizedComment}"` : ""}. Reply yes to continue or no to cancel.`,
+    pendingAction: {
+      type: "approve_invoice",
+      label: `Approve ${invoice.invoiceNumber}`,
+      payload: {
+        approvalRecordId: matchedInvoice.approvalRecordId,
+        invoiceNumber: invoice.invoiceNumber,
+        comment: normalizedComment,
+        reviewer: getAssistantReviewerName(service),
+      },
+    },
+    blockingReasons,
+    warningReasons,
+    invoice,
+    canApprove: true,
+    syncStatus: firstText(validation?.syncStatus, invoice.syncStatus),
+    paymentStatus: firstText(validation?.booksPaymentStatus, invoice.paymentStatus),
+    lastBooksSyncAt: validation?.lastBooksSyncAt || "",
+    lastComparedAt: validation?.lastComparedAt || "",
+  };
+}
+
+export async function prepareRejectInvoice(service, invoiceNumber, reason = "") {
+  const matchedInvoice = await findInvoiceByNumber(service, invoiceNumber);
+  const normalizedReason = normalizeText(reason);
+
+  if (!matchedInvoice) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+      pendingAction: null,
+      invoice: null,
+      reason: "",
+    };
+  }
+
+  if (!normalizedReason) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: `Rejecting ${matchedInvoice.detail.invoiceNumber} requires a reason. Try: reject ${matchedInvoice.detail.invoiceNumber} because wrong amount.`,
+      pendingAction: null,
+      invoice: normalizeInvoiceItem(matchedInvoice.detail),
+      reason: "",
+    };
+  }
+
+  const invoice = normalizeInvoiceItem(matchedInvoice.detail);
+
+  return {
+    ok: true,
+    requiresConfirmation: true,
+    message: `Ready to reject ${invoice.invoiceNumber} with reason "${normalizedReason}". Reply yes to continue or no to cancel.`,
+    pendingAction: {
+      type: "reject_invoice",
+      label: `Reject ${invoice.invoiceNumber}`,
+      payload: {
+        approvalRecordId: matchedInvoice.approvalRecordId,
+        invoiceNumber: invoice.invoiceNumber,
+        reason: normalizedReason,
+        comment: normalizedReason,
+        reviewer: getAssistantReviewerName(service),
+      },
+    },
+    invoice,
+    reason: normalizedReason,
+  };
+}
+
+export async function prepareRequestClarification(service, invoiceNumber, reason = "") {
+  const matchedInvoice = await findInvoiceByNumber(service, invoiceNumber);
+  const normalizedReason = normalizeText(reason);
+
+  if (!matchedInvoice) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+      pendingAction: null,
+      invoice: null,
+      reason: "",
+    };
+  }
+
+  if (!normalizedReason) {
+    return {
+      ok: false,
+      requiresConfirmation: false,
+      message: `Requesting clarification for ${matchedInvoice.detail.invoiceNumber} requires a reason. Try: request clarification ${matchedInvoice.detail.invoiceNumber} missing PO number.`,
+      pendingAction: null,
+      invoice: normalizeInvoiceItem(matchedInvoice.detail),
+      reason: "",
+    };
+  }
+
+  const invoice = normalizeInvoiceItem(matchedInvoice.detail);
+
+  return {
+    ok: true,
+    requiresConfirmation: true,
+    message: `Ready to request clarification for ${invoice.invoiceNumber} with reason "${normalizedReason}". Reply yes to continue or no to cancel.`,
+    pendingAction: {
+      type: "request_clarification",
+      label: `Request clarification for ${invoice.invoiceNumber}`,
+      payload: {
+        approvalRecordId: matchedInvoice.approvalRecordId,
+        invoiceNumber: invoice.invoiceNumber,
+        reason: normalizedReason,
+        comment: normalizedReason,
+        reviewer: getAssistantReviewerName(service),
+      },
+    },
+    invoice,
+    reason: normalizedReason,
+  };
+}
+
 export async function executePendingAssistantAction(service, pendingAction) {
   if (!pendingAction?.type) {
     return createAssistantMessage("There is no pending assistant action to run.", {
@@ -378,6 +618,49 @@ export async function executePendingAssistantAction(service, pendingAction) {
   }
 
   switch (pendingAction.type) {
+    case "approve_invoice": {
+      const validation = await service.validateInvoiceApproval(
+        pendingAction.payload.approvalRecordId,
+      );
+      const blockingReasons = toReasonList(validation?.blockingReasons);
+      const warningReasons = toReasonList(validation?.warningReasons);
+      const invoice = {
+        approvalRecordId: pendingAction.payload.approvalRecordId,
+        invoiceNumber: pendingAction.payload.invoiceNumber,
+      };
+
+      if (validation?.canApprove === false) {
+        return createAssistantMessage(
+          firstText(
+            validation?.message,
+            `${pendingAction.payload.invoiceNumber} is blocked and was not approved.`,
+          ),
+          buildApprovalCheckData(invoice, validation, "warning"),
+        );
+      }
+
+      await service.approveInvoice(pendingAction.payload.approvalRecordId, {
+        reviewer: pendingAction.payload.reviewer,
+        comment: pendingAction.payload.comment,
+      });
+
+      return createAssistantMessage(
+        `${pendingAction.payload.invoiceNumber} was approved through the Creator workflow.`,
+        {
+          type: "action-result",
+          tone: "success",
+          approvalRecordId: pendingAction.payload.approvalRecordId,
+          blockingReasons,
+          warningReasons,
+          refreshScope: {
+            inbox: true,
+            dashboardSummary: true,
+            detail: true,
+            reviewerWorkload: false,
+          },
+        },
+      );
+    }
     case "refresh-invoice-from-books": {
       const refreshMethod =
         service.refreshBooksInvoice ||
@@ -486,6 +769,50 @@ export async function executePendingAssistantAction(service, pendingAction) {
             dashboardSummary: true,
             detail: true,
             reviewerWorkload: true,
+          },
+        },
+      );
+    }
+    case "reject_invoice": {
+      await service.rejectInvoice(pendingAction.payload.approvalRecordId, {
+        reviewer: pendingAction.payload.reviewer,
+        comment: pendingAction.payload.comment,
+        exceptionReason: pendingAction.payload.reason,
+      });
+
+      return createAssistantMessage(
+        `${pendingAction.payload.invoiceNumber} was rejected through the Creator workflow.`,
+        {
+          type: "action-result",
+          tone: "success",
+          approvalRecordId: pendingAction.payload.approvalRecordId,
+          refreshScope: {
+            inbox: true,
+            dashboardSummary: true,
+            detail: true,
+            reviewerWorkload: false,
+          },
+        },
+      );
+    }
+    case "request_clarification": {
+      await service.requestClarification(pendingAction.payload.approvalRecordId, {
+        reviewer: pendingAction.payload.reviewer,
+        comment: pendingAction.payload.comment,
+        exceptionReason: pendingAction.payload.reason,
+      });
+
+      return createAssistantMessage(
+        `${pendingAction.payload.invoiceNumber} was moved to clarification requested through the Creator workflow.`,
+        {
+          type: "action-result",
+          tone: "success",
+          approvalRecordId: pendingAction.payload.approvalRecordId,
+          refreshScope: {
+            inbox: true,
+            dashboardSummary: true,
+            detail: true,
+            reviewerWorkload: false,
           },
         },
       );
@@ -743,6 +1070,30 @@ export async function handleAssistantMessage(service, message) {
         ...(prepared.pendingAction ? { pendingAction: prepared.pendingAction } : {}),
       });
     }
+    case "approve_invoice": {
+      const prepared = await prepareApproveInvoice(
+        service,
+        parsedIntent.invoiceNumber,
+        parsedIntent.comment,
+      );
+      return buildApprovalPreviewMessage(prepared);
+    }
+    case "reject_invoice": {
+      const prepared = await prepareRejectInvoice(
+        service,
+        parsedIntent.invoiceNumber,
+        parsedIntent.reason,
+      );
+      return buildActionPreviewMessage(prepared, "Reject invoice");
+    }
+    case "request_clarification": {
+      const prepared = await prepareRequestClarification(
+        service,
+        parsedIntent.invoiceNumber,
+        parsedIntent.reason,
+      );
+      return buildActionPreviewMessage(prepared, "Request clarification");
+    }
     case "add comment to invoice": {
       const prepared = await prepareAddInvoiceComment(
         service,
@@ -775,14 +1126,14 @@ export async function handleAssistantMessage(service, message) {
       return getInvoiceSummary(service, parsedIntent.invoiceNumber);
     case "invoice reference required":
       return createAssistantMessage(
-        `Include the invoice number so I can run the ${parsedIntent.requestedIntent} check safely. Example: ${parsedIntent.requestedIntent} INV-2026-0018.`,
+        `Include the invoice number so I can run the ${parsedIntent.requestedIntent} request safely. Examples: approve INV-2026-0018, reject INV-2026-0018 because wrong amount, or request clarification INV-2026-0018 missing PO number.`,
         {
           type: "warning",
         },
       );
     default:
       return createAssistantMessage(
-        "Try a quick action or ask one of these: daily briefing, failed refreshes, reviewer workload, escalation briefing, why blocked INV-2026-0018, can approve INV-2026-0018, invoice summary INV-2026-0018, refresh INV-2026-0018 from Books, run escalation check, add comment INV-2026-0018 Need manager review, or assign INV-2026-0018 to finance@example.com.",
+        "Try a quick action or ask one of these: daily briefing, failed refreshes, reviewer workload, escalation briefing, why blocked INV-2026-0018, can approve INV-2026-0018, approve INV-2026-0018, reject INV-2026-0018 because wrong amount, request clarification INV-2026-0018 missing PO number, refresh INV-2026-0018 from Books, run escalation check, add comment INV-2026-0018 Need manager review, or assign INV-2026-0018 to finance@example.com.",
         {
           type: "help",
         },

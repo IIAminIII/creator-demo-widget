@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 function formatCurrency(value, currencyCode) {
   return new Intl.NumberFormat("en-US", {
@@ -221,6 +221,28 @@ function AssistantInvoiceSummary({ data }) {
   );
 }
 
+function AssistantActionPreview({ data }) {
+  if (!data?.actionLabel || !data?.invoiceNumber) {
+    return null;
+  }
+
+  return (
+    <div className="assistant-data-panel">
+      <div className="assistant-data-title">{data.actionLabel}</div>
+      <div className="assistant-definition-grid">
+        <div>
+          <span className="assistant-definition-label">Invoice</span>
+          <span className="assistant-definition-value">{data.invoiceNumber}</span>
+        </div>
+        <div>
+          <span className="assistant-definition-label">Reason</span>
+          <span className="assistant-definition-value">{data.reason || "Not provided"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function renderMessageData(data) {
   if (!data || typeof data !== "object") {
     return null;
@@ -321,6 +343,8 @@ function renderMessageData(data) {
       );
     case "invoice-summary":
       return <AssistantInvoiceSummary data={data} />;
+    case "approval-action-preview":
+      return <AssistantActionPreview data={data} />;
     case "escalation-briefing":
       return (
         <>
@@ -355,6 +379,7 @@ export default function OperationsAssistantCard({
   onSend,
 }) {
   const [draft, setDraft] = useState("");
+  const inputRef = useRef(null);
 
   async function submitMessage(message) {
     const trimmed = String(message || "").trim();
@@ -373,7 +398,7 @@ export default function OperationsAssistantCard({
         <div>
           <h2 className="assistant-card-title">AI Operations Assistant</h2>
           <p className="assistant-card-subtitle">
-            Ask about invoice approvals, blockers, workload, Books refresh issues, and escalations.
+            Ask about approvals and stage guarded approve, reject, or clarification actions with confirmation.
           </p>
         </div>
       </div>
@@ -390,7 +415,19 @@ export default function OperationsAssistantCard({
             key={action.label}
             type="button"
             className="assistant-quick-action"
-            onClick={() => submitMessage(action.prompt)}
+            onClick={() => {
+              if (action.prefillOnly) {
+                setDraft(action.prompt);
+                window.requestAnimationFrame(() => {
+                  inputRef.current?.focus();
+                  const length = action.prompt.length;
+                  inputRef.current?.setSelectionRange?.(length, length);
+                });
+                return;
+              }
+
+              void submitMessage(action.prompt);
+            }}
             disabled={loading || action.disabled}
           >
             {action.label}
@@ -424,8 +461,9 @@ export default function OperationsAssistantCard({
 
       <div className="assistant-compose">
         <input
+          ref={inputRef}
           className="assistant-input"
-          placeholder="Try: can approve INV-2026-0018"
+          placeholder="Try: approve INV-2026-0018 or reject INV-2026-0018 because wrong amount"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {

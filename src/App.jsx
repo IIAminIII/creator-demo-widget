@@ -196,7 +196,7 @@ function createAssistantIntroMessage() {
     id: "assistant-intro-empty",
     role: "assistant",
     content:
-      "This assistant is rule-based and read-only. Ask for a daily briefing, workload, escalations, failed refreshes, or check an invoice with prompts like can approve INV-2026-0018.",
+      "This assistant is rule-based and can safely stage approve, reject, and clarification actions with validation plus confirmation. Try prompts like can approve INV-2026-0018 or approve INV-2026-0018.",
   };
 }
 
@@ -223,6 +223,29 @@ function createAssistantQuickActions(detail = null) {
         ? `refresh ${selectedInvoiceNumber} from Books`
         : "refresh selected from books",
       disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Approve Selected",
+      prompt: hasSelectedInvoice
+        ? `approve ${selectedInvoiceNumber}`
+        : "approve selected",
+      disabled: !hasSelectedInvoice,
+    },
+    {
+      label: "Reject Selected",
+      prompt: hasSelectedInvoice
+        ? `reject ${selectedInvoiceNumber} because `
+        : "reject selected because ",
+      disabled: !hasSelectedInvoice,
+      prefillOnly: true,
+    },
+    {
+      label: "Request Clarification",
+      prompt: hasSelectedInvoice
+        ? `request clarification ${selectedInvoiceNumber} `
+        : "request clarification selected ",
+      disabled: !hasSelectedInvoice,
+      prefillOnly: true,
     },
     {
       label: "Explain Selected Blockers",

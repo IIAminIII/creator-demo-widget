@@ -7,12 +7,19 @@ export const ASSISTANT_QUICK_ACTIONS = [
   "Escalations",
   "Run Escalation Check",
   "Refresh Selected From Books",
+  "Approve Selected",
+  "Reject Selected",
+  "Request Clarification",
   "Explain Selected Blockers",
   "Can Selected Be Approved?",
 ];
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function includesAny(text, phrases) {
@@ -42,6 +49,19 @@ function extractCommentAfterInvoice(message, invoiceNumber) {
   );
   const match = String(message || "").match(expression);
   return match?.[1]?.trim() || "";
+}
+
+export function extractActionReason(text, removableWords = []) {
+  let remaining = String(text || "");
+
+  removableWords
+    .filter(Boolean)
+    .sort((left, right) => String(right).length - String(left).length)
+    .forEach((word) => {
+      remaining = remaining.replace(new RegExp(escapeRegExp(word), "gi"), " ");
+    });
+
+  return remaining.replace(/^[\s,:;-]+/, "").replace(/\s+/g, " ").trim();
 }
 
 export function parseAssistantIntent(message) {
@@ -95,6 +115,43 @@ export function parseAssistantIntent(message) {
       intent: invoiceNumber ? "refresh invoice from books" : "invoice reference required",
       invoiceNumber,
       requestedIntent: "refresh invoice from books",
+    };
+  }
+
+  if (normalizedMessage.startsWith("approve")) {
+    return {
+      intent: invoiceNumber ? "approve_invoice" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "approve",
+      comment: extractActionReason(message, ["approve", invoiceNumber]),
+    };
+  }
+
+  if (normalizedMessage.startsWith("reject")) {
+    return {
+      intent: invoiceNumber ? "reject_invoice" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "reject",
+      reason: extractActionReason(message, ["reject", "because", invoiceNumber]),
+    };
+  }
+
+  if (
+    normalizedMessage.startsWith("request clarification") ||
+    normalizedMessage.startsWith("clarification request") ||
+    normalizedMessage.startsWith("clarify")
+  ) {
+    return {
+      intent: invoiceNumber ? "request_clarification" : "invoice reference required",
+      invoiceNumber,
+      requestedIntent: "request clarification",
+      reason: extractActionReason(message, [
+        "request clarification",
+        "clarification request",
+        "clarify",
+        "because",
+        invoiceNumber,
+      ]),
     };
   }
 
