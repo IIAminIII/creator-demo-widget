@@ -243,6 +243,44 @@ function AssistantActionPreview({ data }) {
   );
 }
 
+function AssistantLineItems({ lineItems = [], invoiceNumber = "" }) {
+  if (!lineItems.length) {
+    return null;
+  }
+
+  return (
+    <div className="assistant-data-panel">
+      <div className="assistant-data-title">
+        Line Items
+        <span className="assistant-inline-count">{lineItems.length}</span>
+      </div>
+      <div className="assistant-list">
+        {lineItems.map((line, index) => (
+          <div
+            key={`${invoiceNumber}-line-${index}`}
+            className="assistant-list-row"
+          >
+            <div className="assistant-list-row-main">
+              <div className="assistant-list-row-title">{line.name}</div>
+              {line.description ? (
+                <div className="assistant-list-row-subtitle">{line.description}</div>
+              ) : null}
+            </div>
+            <div className="assistant-list-row-meta">
+              <span>Qty: {line.quantity}</span>
+              <span>{formatCurrency(line.rate)}</span>
+              <span>{formatCurrency(line.amount)}</span>
+              {line.taxName ? (
+                <span>{line.taxName} ({line.taxPercentage}%)</span>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function renderMessageData(data) {
   if (!data || typeof data !== "object") {
     return null;
@@ -345,6 +383,34 @@ function renderMessageData(data) {
       return <AssistantInvoiceSummary data={data} />;
     case "approval-action-preview":
       return <AssistantActionPreview data={data} />;
+    case "invoice-line-items":
+      return (
+        <>
+          <div className="assistant-data-panel">
+            <div className="assistant-data-title">Invoice Summary</div>
+            <div className="assistant-definition-grid">
+              <div>
+                <span className="assistant-definition-label">Invoice</span>
+                <span className="assistant-definition-value">{data.invoice?.invoiceNumber}</span>
+              </div>
+              <div>
+                <span className="assistant-definition-label">Customer</span>
+                <span className="assistant-definition-value">{data.invoice?.customerName || "Unknown"}</span>
+              </div>
+              <div>
+                <span className="assistant-definition-label">Total</span>
+                <span className="assistant-definition-value">
+                  {formatCurrency(data.invoice?.invoiceTotal, data.invoice?.currencyCode)}
+                </span>
+              </div>
+            </div>
+          </div>
+          <AssistantLineItems
+            lineItems={data.lineItems || []}
+            invoiceNumber={data.invoice?.invoiceNumber || ""}
+          />
+        </>
+      );
     case "escalation-briefing":
       return (
         <>
@@ -376,6 +442,7 @@ export default function OperationsAssistantCard({
   loading = false,
   quickActions = [],
   pendingAction = null,
+  chatbotContext = null,
   onSend,
 }) {
   const [draft, setDraft] = useState("");
@@ -408,6 +475,16 @@ export default function OperationsAssistantCard({
           Pending action: {pendingAction.label}. Reply yes to continue or no to cancel.
         </div>
       ) : null}
+
+      <div className="assistant-context-badge">
+        {chatbotContext?.lastInvoiceNumber ? (
+          <span className="assistant-context-badge-active">
+            Current invoice: {chatbotContext.lastInvoiceNumber}
+          </span>
+        ) : (
+          <span className="assistant-context-badge-empty">No invoice selected</span>
+        )}
+      </div>
 
       <div className="assistant-quick-actions">
         {quickActions.map((action) => (

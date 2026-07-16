@@ -1,4 +1,4 @@
-import { parseAssistantIntent } from "./chatbotAssistant";
+import { parseAssistantIntent, resolveInvoiceNumberFromContext } from "./chatbotAssistant";
 
 const MAX_LIST_ITEMS = 5;
 const MAX_WORKLOAD_ITEMS = 5;
@@ -976,7 +976,62 @@ export async function getEscalationBriefing(service) {
   );
 }
 
-export async function handleAssistantMessage(service, message) {
+export async function getInvoiceLineItems(service, invoiceNumber) {
+  const matchedInvoice = await findInvoiceByNumber(service, invoiceNumber);
+
+  if (!matchedInvoice) {
+    return createAssistantMessage(
+      `I could not find ${invoiceNumber}. Try the full invoice number like INV-2026-0018.`,
+      {
+        type: "warning",
+      },
+    );
+  }
+
+  const detail = matchedInvoice.detail;
+  const lineItems = Array.isArray(detail.lineItems) ? detail.lineItems : [];
+
+  if (!lineItems.length) {
+    return createAssistantMessage(
+      `${detail.invoiceNumber} has no line items recorded.`,
+      {
+        type: "invoice-line-items",
+        approvalRecordId: detail.approvalRecordId,
+        invoice: normalizeInvoiceItem(detail),
+        lineItems: [],
+      },
+    );
+  }
+
+  return createAssistantMessage(
+    `${detail.invoiceNumber} has ${lineItems.length} line item(s) totaling ${formatCurrencyValue(detail.invoiceTotal, detail.currencyCode)}.`,
+    {
+      type: "invoice-line-items",
+      approvalRecordId: detail.approvalRecordId,
+      invoice: normalizeInvoiceItem(detail),
+      lineItems: lineItems.map((line) => ({
+        name: line.name || line.description || "Unnamed item",
+        description: line.description || "",
+        quantity: Number(line.quantity || 0),
+        unit: line.unit || "",
+        rate: Number(line.rate || 0),
+        amount: Number(line.amount || line.total || 0),
+        taxName: line.taxName || "",
+        taxPercentage: line.taxPercentage || 0,
+      })),
+    },
+  );
+}
+
+function formatCurrencyValue(value, currencyCode) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currencyCode || "USD",
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
+}
+
+export async function handleAssistantMessage(service, message, context = null) {
   const parsedIntent = parseAssistantIntent(message);
 
   switch (parsedIntent.intent) {
@@ -987,6 +1042,11 @@ export async function handleAssistantMessage(service, message) {
     case "cancel pending action":
       return createAssistantMessage("The pending action was not executed.", {
         type: "help",
+      });
+    case "clear context":
+      return createAssistantMessage("Invoice context cleared. Mention an invoice number for the next command.", {
+        type: "context-cleared",
+        clearContext: true,
       });
     case "daily briefing":
       return getDailyBriefing(service);
@@ -1063,7 +1123,14 @@ export async function handleAssistantMessage(service, message) {
       });
     }
     case "refresh invoice from books": {
-      const prepared = await prepareRefreshInvoiceFromBooks(service, parsedIntent.invoiceNumber);
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice should I refresh? Include the invoice number like: refresh INV-2026-0018 from Books.",
+          { type: "warning" },
+        );
+      }
+      const prepared = await prepareRefreshInvoiceFromBooks(service, resolvedInvoiceNumber);
       return createAssistantMessage(prepared.message, {
         type: prepared.ok ? "pending-action" : "warning",
         tone: prepared.ok ? "warning" : "warning",
@@ -1071,33 +1138,61 @@ export async function handleAssistantMessage(service, message) {
       });
     }
     case "approve_invoice": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice should I approve? Include the invoice number like: approve INV-2026-0018.",
+          { type: "warning" },
+        );
+      }
       const prepared = await prepareApproveInvoice(
         service,
-        parsedIntent.invoiceNumber,
+        resolvedInvoiceNumber,
         parsedIntent.comment,
       );
       return buildApprovalPreviewMessage(prepared);
     }
     case "reject_invoice": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice should I reject? Include the invoice number like: reject INV-2026-0018 because wrong amount.",
+          { type: "warning" },
+        );
+      }
       const prepared = await prepareRejectInvoice(
         service,
-        parsedIntent.invoiceNumber,
+        resolvedInvoiceNumber,
         parsedIntent.reason,
       );
       return buildActionPreviewMessage(prepared, "Reject invoice");
     }
     case "request_clarification": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice needs clarification? Include the invoice number like: request clarification INV-2026-0018 missing PO number.",
+          { type: "warning" },
+        );
+      }
       const prepared = await prepareRequestClarification(
         service,
-        parsedIntent.invoiceNumber,
+        resolvedInvoiceNumber,
         parsedIntent.reason,
       );
       return buildActionPreviewMessage(prepared, "Request clarification");
     }
     case "add comment to invoice": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice should I add a comment to? Include the invoice number like: add comment INV-2026-0018 Need manager review.",
+          { type: "warning" },
+        );
+      }
       const prepared = await prepareAddInvoiceComment(
         service,
-        parsedIntent.invoiceNumber,
+        resolvedInvoiceNumber,
         parsedIntent.comment,
       );
       return createAssistantMessage(prepared.message, {
@@ -1107,9 +1202,16 @@ export async function handleAssistantMessage(service, message) {
       });
     }
     case "assign reviewer": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice should I assign? Include the invoice number like: assign INV-2026-0018 to reviewer@example.com.",
+          { type: "warning" },
+        );
+      }
       const prepared = await prepareAssignReviewer(
         service,
-        parsedIntent.invoiceNumber,
+        resolvedInvoiceNumber,
         parsedIntent.reviewerEmail,
       );
       return createAssistantMessage(prepared.message, {
@@ -1118,12 +1220,46 @@ export async function handleAssistantMessage(service, message) {
         ...(prepared.pendingAction ? { pendingAction: prepared.pendingAction } : {}),
       });
     }
-    case "why blocked":
-      return explainBlockedInvoice(service, parsedIntent.invoiceNumber);
-    case "can approve":
-      return canApproveInvoice(service, parsedIntent.invoiceNumber);
-    case "invoice summary":
-      return getInvoiceSummary(service, parsedIntent.invoiceNumber);
+    case "why blocked": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice should I check? Include the invoice number like: why blocked INV-2026-0018.",
+          { type: "warning" },
+        );
+      }
+      return explainBlockedInvoice(service, resolvedInvoiceNumber);
+    }
+    case "can approve": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice should I check? Include the invoice number like: can approve INV-2026-0018.",
+          { type: "warning" },
+        );
+      }
+      return canApproveInvoice(service, resolvedInvoiceNumber);
+    }
+    case "invoice summary": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice should I summarize? Include the invoice number like: invoice summary INV-2026-0018.",
+          { type: "warning" },
+        );
+      }
+      return getInvoiceSummary(service, resolvedInvoiceNumber);
+    }
+    case "invoice_line_items": {
+      const resolvedInvoiceNumber = resolveInvoiceNumberFromContext(parsedIntent, context);
+      if (!resolvedInvoiceNumber) {
+        return createAssistantMessage(
+          "Which invoice line items should I show? Include the invoice number like: show line items INV-2026-0018.",
+          { type: "warning" },
+        );
+      }
+      return getInvoiceLineItems(service, resolvedInvoiceNumber);
+    }
     case "invoice reference required":
       return createAssistantMessage(
         `Include the invoice number so I can run the ${parsedIntent.requestedIntent} request safely. Examples: approve INV-2026-0018, reject INV-2026-0018 because wrong amount, or request clarification INV-2026-0018 missing PO number.`,

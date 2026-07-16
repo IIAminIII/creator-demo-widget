@@ -11,6 +11,11 @@ import {
 } from "./services/approvalAssistantTools";
 import { parseAssistantIntent } from "./services/chatbotAssistant";
 import {
+  createEmptyChatContext,
+  updateChatContextFromResult,
+  updateChatContextFromSelection,
+} from "./services/chatbotContext";
+import {
   createInvoiceApprovalService,
   resolveInvoiceApprovalConfig,
 } from "./services/invoiceApprovalService";
@@ -309,6 +314,7 @@ export default function App() {
   ]);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [pendingAssistantAction, setPendingAssistantAction] = useState(null);
+  const [chatbotContext, setChatbotContext] = useState(createEmptyChatContext);
 
   function dismissToast(toastId) {
     setToasts((current) => current.filter((toast) => toast.id !== toastId));
@@ -488,6 +494,16 @@ export default function App() {
       const detail = await service.loadInvoiceDetail(recordId);
       setSelectedDetail(detail);
       setGuardrailCheck(null);
+      if (detail?.invoiceNumber) {
+        setChatbotContext((current) =>
+          updateChatContextFromSelection(
+            current,
+            detail.invoiceNumber,
+            recordId,
+            detail,
+          ),
+        );
+      }
     } catch (error) {
       if (!silent) {
         pushToast({
@@ -529,6 +545,7 @@ export default function App() {
   useEffect(() => {
     setAssistantMessages([createAssistantIntroMessage()]);
     setPendingAssistantAction(null);
+    setChatbotContext(createEmptyChatContext());
   }, [service.mode]);
 
   useEffect(() => {
@@ -792,6 +809,10 @@ export default function App() {
             activePendingAction.payload?.approvalRecordId,
           );
 
+          setChatbotContext((current) =>
+            updateChatContextFromResult(current, response, activePendingAction.type),
+          );
+
           setAssistantMessages((current) => [
             ...current,
             {
@@ -833,11 +854,19 @@ export default function App() {
         return;
       }
 
-      const response = await handleAssistantMessage(service, trimmedPrompt);
+      const response = await handleAssistantMessage(service, trimmedPrompt, chatbotContext);
       const approvalRecordId = response?.data?.approvalRecordId;
       const nextGuardrailCheck = response?.data?.guardrailCheck;
       const nextPendingAction = response?.data?.pendingAction || null;
       const pendingApprovalRecordId = nextPendingAction?.payload?.approvalRecordId || "";
+
+      if (response?.data?.clearContext) {
+        setChatbotContext(createEmptyChatContext());
+      } else {
+        setChatbotContext((current) =>
+          updateChatContextFromResult(current, response, parsedIntent.intent),
+        );
+      }
 
       if (approvalRecordId) {
         setSelectedRecordId(approvalRecordId);
@@ -1257,6 +1286,7 @@ export default function App() {
         loading={assistantLoading}
         quickActions={assistantQuickActions}
         pendingAction={pendingAssistantAction}
+        chatbotContext={chatbotContext}
         onSend={handleAssistantPrompt}
       />
 

@@ -536,6 +536,35 @@
   color: #475569;
 }
 
+.assistant-context-badge {
+  margin-top: 0.75rem;
+}
+
+.assistant-context-badge-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.assistant-context-badge-empty {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
 @media (max-width: 720px) {
   .assistant-compose {
     grid-template-columns: 1fr;
