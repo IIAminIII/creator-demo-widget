@@ -536,6 +536,126 @@
   color: #475569;
 }
 
+.assistant-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.assistant-badge-success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.assistant-badge-danger {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.assistant-badge-warning {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.assistant-badge-info {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.assistant-badge-neutral {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.assistant-suggested-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.assistant-suggested-action {
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 100ms ease,
+    background 100ms ease,
+    border-color 100ms ease;
+}
+
+.assistant-suggested-action:hover {
+  transform: translateY(-1px);
+  border-color: #818cf8;
+  background: #e0e7ff;
+}
+
+.assistant-line-items-table-wrap {
+  margin-top: 0.75rem;
+  overflow-x: auto;
+}
+
+.assistant-line-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.assistant-line-items-table thead {
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.assistant-line-items-table th {
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.assistant-line-items-table td {
+  padding: 0.6rem 0.65rem;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+}
+
+.assistant-line-items-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.assistant-line-item-name {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.assistant-line-item-desc {
+  margin-top: 0.1rem;
+  font-size: 0.76rem;
+  color: #94a3b8;
+}
+
+.assistant-line-item-amount {
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .assistant-context-badge {
   margin-top: 0.75rem;
 }

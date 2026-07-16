@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 function formatCurrency(value, currencyCode) {
   return new Intl.NumberFormat("en-US", {
@@ -20,6 +20,89 @@ function formatDateTime(value) {
   }
 
   return parsed.toLocaleString();
+}
+
+function getBadgeClass(value) {
+  const normalized = String(value || "").toLowerCase();
+
+  if (
+    normalized.includes("approved") ||
+    normalized.includes("synced") ||
+    normalized.includes("paid") ||
+    normalized.includes("success") ||
+    normalized.includes("safe")
+  ) {
+    return "assistant-badge assistant-badge-success";
+  }
+
+  if (
+    normalized.includes("rejected") ||
+    normalized.includes("failed") ||
+    normalized.includes("blocked") ||
+    normalized.includes("overdue") ||
+    normalized.includes("error")
+  ) {
+    return "assistant-badge assistant-badge-danger";
+  }
+
+  if (
+    normalized.includes("review") ||
+    normalized.includes("manual") ||
+    normalized.includes("clarification") ||
+    normalized.includes("needs") ||
+    normalized.includes("pending") ||
+    normalized.includes("warning")
+  ) {
+    return "assistant-badge assistant-badge-warning";
+  }
+
+  if (
+    normalized.includes("new") ||
+    normalized.includes("unassigned") ||
+    normalized.includes("unknown")
+  ) {
+    return "assistant-badge assistant-badge-neutral";
+  }
+
+  return "assistant-badge assistant-badge-info";
+}
+
+function Badge({ label }) {
+  if (!label) {
+    return null;
+  }
+
+  return <span className={getBadgeClass(label)}>{label}</span>;
+}
+
+function SuggestedActions({ invoiceNumber, onSend }) {
+  if (!invoiceNumber || !onSend) {
+    return null;
+  }
+
+  const actions = [
+    { label: "Explain Blockers", command: `why blocked ${invoiceNumber}` },
+    { label: "Can Approve?", command: `can approve ${invoiceNumber}` },
+    { label: "Refresh", command: `refresh ${invoiceNumber} from Books` },
+    { label: "Line Items", command: `show line items ${invoiceNumber}` },
+    { label: "Approve", command: `approve ${invoiceNumber}` },
+    { label: "Reject", command: `reject ${invoiceNumber} because ` },
+  ];
+
+  return (
+    <div className="assistant-suggested-actions">
+      {actions.map((action) => (
+        <button
+          key={action.label}
+          type="button"
+          className="assistant-suggested-action"
+          onClick={() => onSend(action.command)}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function MessageToneClass({ role, tone }) {
@@ -91,8 +174,8 @@ function AssistantInvoiceList({ title, items = [], totalCount = 0, emptyMessage 
                 <div className="assistant-list-row-subtitle">{item.customerName || "Unknown customer"}</div>
               </div>
               <div className="assistant-list-row-meta">
-                <span>{item.approvalStatus}</span>
-                <span>{item.syncStatus}</span>
+                <Badge label={item.approvalStatus} />
+                <Badge label={item.syncStatus} />
                 <span>{formatCurrency(item.invoiceTotal, item.currencyCode)}</span>
               </div>
             </div>
@@ -173,7 +256,10 @@ function AssistantInvoiceSummary({ data }) {
   return (
     <>
       <div className="assistant-data-panel">
-        <div className="assistant-data-title">Invoice Summary</div>
+        <div className="assistant-data-title">
+          Invoice Summary
+          <Badge label={invoice.approvalStatus} />
+        </div>
         <div className="assistant-definition-grid">
           <div>
             <span className="assistant-definition-label">Customer</span>
@@ -181,15 +267,21 @@ function AssistantInvoiceSummary({ data }) {
           </div>
           <div>
             <span className="assistant-definition-label">Approval</span>
-            <span className="assistant-definition-value">{invoice.approvalStatus}</span>
+            <span className="assistant-definition-value">
+              <Badge label={invoice.approvalStatus} />
+            </span>
           </div>
           <div>
             <span className="assistant-definition-label">Sync</span>
-            <span className="assistant-definition-value">{invoice.syncStatus}</span>
+            <span className="assistant-definition-value">
+              <Badge label={invoice.syncStatus} />
+            </span>
           </div>
           <div>
             <span className="assistant-definition-label">Payment</span>
-            <span className="assistant-definition-value">{invoice.paymentStatus}</span>
+            <span className="assistant-definition-value">
+              <Badge label={invoice.paymentStatus} />
+            </span>
           </div>
           <div>
             <span className="assistant-definition-label">Reviewer</span>
@@ -217,6 +309,70 @@ function AssistantInvoiceSummary({ data }) {
       <AssistantReasonList title="Blocking Reasons" reasons={data?.blockingReasons} tone="warning" />
       <AssistantReasonList title="Warning Reasons" reasons={data?.warningReasons} tone="warning" />
       <AssistantAuditSummary items={data?.recentAudit || []} />
+    </>
+  );
+}
+
+function AssistantApprovalValidation({ data }) {
+  const invoice = data?.invoice;
+  const canApprove = data?.canApprove;
+  const blockingReasons = data?.blockingReasons || [];
+  const warningReasons = data?.warningReasons || [];
+
+  return (
+    <>
+      <div className="assistant-data-panel">
+        <div className="assistant-data-title">
+          Approval Safety
+          <Badge label={canApprove ? "Safe to Approve" : "Blocked"} />
+        </div>
+        <div className="assistant-definition-grid">
+          <div>
+            <span className="assistant-definition-label">Invoice</span>
+            <span className="assistant-definition-value">{invoice?.invoiceNumber}</span>
+          </div>
+          <div>
+            <span className="assistant-definition-label">Can Approve</span>
+            <span className="assistant-definition-value">
+              <Badge label={canApprove ? "Yes" : "No"} />
+            </span>
+          </div>
+          <div>
+            <span className="assistant-definition-label">Sync</span>
+            <span className="assistant-definition-value">
+              <Badge label={data?.syncStatus} />
+            </span>
+          </div>
+          <div>
+            <span className="assistant-definition-label">Payment</span>
+            <span className="assistant-definition-value">
+              <Badge label={data?.paymentStatus} />
+            </span>
+          </div>
+          <div>
+            <span className="assistant-definition-label">Last Sync</span>
+            <span className="assistant-definition-value">
+              {formatDateTime(data?.lastBooksSyncAt)}
+            </span>
+          </div>
+          <div>
+            <span className="assistant-definition-label">Last Compared</span>
+            <span className="assistant-definition-value">
+              {formatDateTime(data?.lastComparedAt)}
+            </span>
+          </div>
+        </div>
+      </div>
+      <AssistantReasonList
+        title="Blocking Reasons"
+        reasons={blockingReasons}
+        tone="warning"
+      />
+      <AssistantReasonList
+        title="Warning Reasons"
+        reasons={warningReasons}
+        tone="warning"
+      />
     </>
   );
 }
@@ -254,41 +410,72 @@ function AssistantLineItems({ lineItems = [], invoiceNumber = "" }) {
         Line Items
         <span className="assistant-inline-count">{lineItems.length}</span>
       </div>
-      <div className="assistant-list">
-        {lineItems.map((line, index) => (
-          <div
-            key={`${invoiceNumber}-line-${index}`}
-            className="assistant-list-row"
-          >
-            <div className="assistant-list-row-main">
-              <div className="assistant-list-row-title">{line.name}</div>
-              {line.description ? (
-                <div className="assistant-list-row-subtitle">{line.description}</div>
-              ) : null}
-            </div>
-            <div className="assistant-list-row-meta">
-              <span>Qty: {line.quantity}</span>
-              <span>{formatCurrency(line.rate)}</span>
-              <span>{formatCurrency(line.amount)}</span>
-              {line.taxName ? (
-                <span>{line.taxName} ({line.taxPercentage}%)</span>
-              ) : null}
-            </div>
-          </div>
-        ))}
+      <div className="assistant-line-items-table-wrap">
+        <table className="assistant-line-items-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Qty</th>
+              <th>Rate</th>
+              <th>Amount</th>
+              <th>Tax</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lineItems.map((line, index) => (
+              <tr key={`${invoiceNumber}-line-${index}`}>
+                <td>
+                  <div className="assistant-line-item-name">{line.name}</div>
+                  {line.description ? (
+                    <div className="assistant-line-item-desc">{line.description}</div>
+                  ) : null}
+                </td>
+                <td>{line.quantity}</td>
+                <td>{formatCurrency(line.rate)}</td>
+                <td className="assistant-line-item-amount">{formatCurrency(line.amount)}</td>
+                <td>
+                  {line.taxName ? `${line.taxName} (${line.taxPercentage}%)` : "N/A"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 }
 
-function renderMessageData(data) {
+function AssistantActionResult({ data }) {
+  const tone = data?.tone === "success" ? "success" : "warning";
+
+  return (
+    <div className={`assistant-data-panel assistant-data-panel-${tone}`}>
+      <div className="assistant-data-title">
+        {tone === "success" ? "Action Completed" : "Action Result"}
+      </div>
+      <div className="assistant-definition-grid">
+        {data?.approvalRecordId ? (
+          <div>
+            <span className="assistant-definition-label">Record</span>
+            <span className="assistant-definition-value">{data.approvalRecordId}</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function renderMessageData(data, onSend) {
   if (!data || typeof data !== "object") {
     return null;
   }
 
+  const invoiceNumber = data?.invoice?.invoiceNumber || "";
+
   switch (data.type) {
     case "dashboard-summary":
       return <AssistantMiniStatGrid stats={data.stats || []} />;
+
     case "daily-briefing":
       return (
         <>
@@ -298,6 +485,12 @@ function renderMessageData(data) {
             items={data.failedRefreshes || []}
             totalCount={data.failedRefreshes?.length || 0}
             emptyMessage="No failed refreshes are in the queue."
+          />
+          <AssistantInvoiceList
+            title="Review Needed"
+            items={data.reviewNeeded || []}
+            totalCount={data.reviewNeeded?.length || 0}
+            emptyMessage="No invoices need review."
           />
           <AssistantInvoiceList
             title="Manual Review"
@@ -311,17 +504,28 @@ function renderMessageData(data) {
             totalCount={data.unassignedInvoices?.length || 0}
             emptyMessage="No unassigned invoices are waiting."
           />
+          <AssistantReviewerWorkload
+            items={data.reviewerWorkload || []}
+            totalCount={data.reviewerWorkload?.length || 0}
+          />
         </>
       );
+
     case "invoice-list":
       return (
-        <AssistantInvoiceList
-          title={data.title}
-          items={data.items || []}
-          totalCount={data.totalCount || 0}
-          emptyMessage={data.emptyMessage}
-        />
+        <>
+          <AssistantInvoiceList
+            title={data.title}
+            items={data.items || []}
+            totalCount={data.totalCount || 0}
+            emptyMessage={data.emptyMessage}
+          />
+          {invoiceNumber ? (
+            <SuggestedActions invoiceNumber={invoiceNumber} onSend={onSend} />
+          ) : null}
+        </>
       );
+
     case "reviewer-workload":
       return (
         <AssistantReviewerWorkload
@@ -329,60 +533,30 @@ function renderMessageData(data) {
           totalCount={data.totalCount || 0}
         />
       );
+
     case "approval-check":
       return (
         <>
-          <div className="assistant-data-panel">
-            <div className="assistant-data-title">Approval Safety</div>
-            <div className="assistant-definition-grid">
-              <div>
-                <span className="assistant-definition-label">Invoice</span>
-                <span className="assistant-definition-value">{data.invoice?.invoiceNumber}</span>
-              </div>
-              <div>
-                <span className="assistant-definition-label">Can Approve</span>
-                <span className="assistant-definition-value">
-                  {data.canApprove ? "Yes" : "No"}
-                </span>
-              </div>
-              <div>
-                <span className="assistant-definition-label">Sync</span>
-                <span className="assistant-definition-value">{data.syncStatus}</span>
-              </div>
-              <div>
-                <span className="assistant-definition-label">Payment</span>
-                <span className="assistant-definition-value">{data.paymentStatus}</span>
-              </div>
-              <div>
-                <span className="assistant-definition-label">Last Sync</span>
-                <span className="assistant-definition-value">
-                  {formatDateTime(data.lastBooksSyncAt)}
-                </span>
-              </div>
-              <div>
-                <span className="assistant-definition-label">Last Compared</span>
-                <span className="assistant-definition-value">
-                  {formatDateTime(data.lastComparedAt)}
-                </span>
-              </div>
-            </div>
-          </div>
-          <AssistantReasonList
-            title="Blocking Reasons"
-            reasons={data.blockingReasons || []}
-            tone="warning"
-          />
-          <AssistantReasonList
-            title="Warning Reasons"
-            reasons={data.warningReasons || []}
-            tone="warning"
-          />
+          <AssistantApprovalValidation data={data} />
+          {invoiceNumber ? (
+            <SuggestedActions invoiceNumber={invoiceNumber} onSend={onSend} />
+          ) : null}
         </>
       );
+
     case "invoice-summary":
-      return <AssistantInvoiceSummary data={data} />;
+      return (
+        <>
+          <AssistantInvoiceSummary data={data} />
+          {invoiceNumber ? (
+            <SuggestedActions invoiceNumber={invoiceNumber} onSend={onSend} />
+          ) : null}
+        </>
+      );
+
     case "approval-action-preview":
       return <AssistantActionPreview data={data} />;
+
     case "invoice-line-items":
       return (
         <>
@@ -409,8 +583,12 @@ function renderMessageData(data) {
             lineItems={data.lineItems || []}
             invoiceNumber={data.invoice?.invoiceNumber || ""}
           />
+          {invoiceNumber ? (
+            <SuggestedActions invoiceNumber={invoiceNumber} onSend={onSend} />
+          ) : null}
         </>
       );
+
     case "escalation-briefing":
       return (
         <>
@@ -432,6 +610,22 @@ function renderMessageData(data) {
           />
         </>
       );
+
+    case "pending-action":
+      return null;
+
+    case "action-result":
+      return <AssistantActionResult data={data} />;
+
+    case "warning":
+      return null;
+
+    case "help":
+      return null;
+
+    case "context-cleared":
+      return null;
+
     default:
       return null;
   }
@@ -447,17 +641,19 @@ export default function OperationsAssistantCard({
 }) {
   const [draft, setDraft] = useState("");
   const inputRef = useRef(null);
+  const threadRef = useRef(null);
 
-  async function submitMessage(message) {
-    const trimmed = String(message || "").trim();
-
-    if (!trimmed) {
-      return;
-    }
-
-    await onSend?.(trimmed);
-    setDraft("");
-  }
+  const handleSubmit = useCallback(
+    (message) => {
+      const trimmed = String(message || "").trim();
+      if (!trimmed) {
+        return;
+      }
+      onSend?.(trimmed);
+      setDraft("");
+    },
+    [onSend],
+  );
 
   return (
     <section className="widget-surface assistant-card">
@@ -503,7 +699,7 @@ export default function OperationsAssistantCard({
                 return;
               }
 
-              void submitMessage(action.prompt);
+              void handleSubmit(action.prompt);
             }}
             disabled={loading || action.disabled}
           >
@@ -512,7 +708,7 @@ export default function OperationsAssistantCard({
         ))}
       </div>
 
-      <div className="assistant-thread">
+      <div className="assistant-thread" ref={threadRef}>
         {messages.map((message) => (
           <div key={message.id} className={MessageToneClass({
             role: message.role,
@@ -522,7 +718,7 @@ export default function OperationsAssistantCard({
               {message.role === "user" ? "You" : "Assistant"}
             </div>
             <div className="assistant-message-copy">{message.content}</div>
-            {message.role === "assistant" ? renderMessageData(message.data) : null}
+            {message.role === "assistant" ? renderMessageData(message.data, handleSubmit) : null}
           </div>
         ))}
 
@@ -546,7 +742,7 @@ export default function OperationsAssistantCard({
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              void submitMessage(draft);
+              void handleSubmit(draft);
             }
           }}
         />
@@ -554,7 +750,7 @@ export default function OperationsAssistantCard({
           type="button"
           className="assistant-send-button"
           disabled={loading || !draft.trim()}
-          onClick={() => submitMessage(draft)}
+          onClick={() => handleSubmit(draft)}
         >
           Send
         </button>
